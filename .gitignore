@@ -1,0 +1,6 @@
+/build/
+/build-fast/
+/CMakeUserPresets.json
+/.vs/
+*.user
+*.VC.db

@@ -1,0 +1,22 @@
+{
+  "name": "rps-ui-framework",
+  "version-string": "0.1.0",
+  "builtin-baseline": "b4a3d89125e45bc8f80fb94bef9761d4f4e14fb9",
+  "dependencies": [
+    "args",
+    "directxtk",
+    "rapidcsv",
+    "rsm-mmio",
+    "spdlog",
+    "xbyak",
+    "nlohmann-json",
+    "simpleini",
+    "thomasmonkman-filewatch",
+    "cpptrace"
+  ],
+  "overrides": [
+    { "name": "cpptrace", "version": "1.0.0" },
+    { "name": "fmt", "version": "10.2.1" },
+    { "name": "spdlog", "version": "1.13.0" }
+  ]
+}

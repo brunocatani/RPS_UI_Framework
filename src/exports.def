@@ -1,0 +1,5 @@
+LIBRARY "RPS_UI_Framework"
+EXPORTS
+    F4SEPlugin_Query
+    F4SEPlugin_Load
+    RPSUI_RequestApi
