@@ -99,7 +99,8 @@ namespace
             featureMask(FeatureV1::ContextualTwoAxisScroll) |
             featureMask(FeatureV1::PhysicalPanelResize) |
             featureMask(FeatureV1::ConsumerRenderCallbacks) |
-            featureMask(FeatureV1::SharedStereoComposition),
+            featureMask(FeatureV1::SharedStereoComposition) |
+            featureMask(FeatureV1::ShapedPanels),
         .isFrameworkReady = &isFrameworkReady,
         .registerConsumer = &registerConsumer,
         .unregisterConsumer = &unregisterConsumer,

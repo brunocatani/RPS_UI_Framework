@@ -25,7 +25,15 @@ namespace
     void testApiContract()
     {
         using namespace rpsui::sdk;
+        static_assert(sizeof(PanelRegistrationV1) == 248);
+        static_assert(offsetof(PanelRegistrationV1, flags) == 192);
+        static_assert(offsetof(PanelRegistrationV1, renderCallback) == 200);
         require(RPSUI_API_VERSION == 1, "API version changed");
+        const auto circle = static_cast<std::uint32_t>(PanelFlagV1::CircularInput);
+        require(panelContains(0, 0.01f, 0.01f), "existing rectangle lost its corner");
+        require(!panelContains(circle, 0.01f, 0.01f), "circular panel captured a transparent corner");
+        require(panelContains(circle, 0.5f, 0.5f), "circular panel lost its center");
+        require(panelContains(circle, 0.5f, 0.0f), "circular panel lost its edge");
         require(sizeof(PanelRenderFrameV1) >= 120, "render frame ABI shrank");
         require(
             featureMask(FeatureV1::MultipleWorldPanels) != 0,

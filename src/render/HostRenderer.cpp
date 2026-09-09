@@ -535,12 +535,13 @@ namespace rpsui::render
             viewport.MinDepth = 0.0f;
             viewport.MaxDepth = 1.0f;
             state.context->RSSetViewports(1, &viewport);
-            constexpr std::array clear{
+            std::array clear{
                 0.035f,
                 0.043f,
                 0.055f,
                 1.0f,
             };
+            if (sdk::hasPanelFlag(panel.flags, sdk::PanelFlagV1::Transparent)) clear.fill(0.0f);
             state.context->ClearRenderTargetView(
                 renderTarget,
                 clear.data());

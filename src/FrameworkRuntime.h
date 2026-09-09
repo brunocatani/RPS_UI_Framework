@@ -28,6 +28,7 @@ namespace rpsui
         std::uint32_t pixelWidth{ 0 };
         std::uint32_t pixelHeight{ 0 };
         std::int32_t sortOrder{ 0 };
+        std::uint32_t flags{ 0 };
         rpsui::sdk::PanelPoseV1 pose{};
         rpsui::sdk::PhysicalHandV1 pointerHand{
             rpsui::sdk::PhysicalHandV1::None
@@ -146,6 +147,7 @@ namespace rpsui
             float minimumPhysicalWidth{ 0.0f };
             float maximumPhysicalWidth{ 0.0f };
             std::int32_t sortOrder{ 0 };
+            std::uint32_t flags{ 0 };
             rpsui::sdk::PanelRenderCallbackV1 renderCallback{ nullptr };
             void* userData{ nullptr };
             rpsui::sdk::PanelPoseV1 pose{};

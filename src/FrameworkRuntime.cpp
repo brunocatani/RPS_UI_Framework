@@ -46,7 +46,8 @@ namespace rpsui
             rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::ContextualTwoAxisScroll) |
             rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::PhysicalPanelResize) |
             rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::ConsumerRenderCallbacks) |
-            rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::SharedStereoComposition);
+            rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::SharedStereoComposition) |
+            rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::ShapedPanels);
 
         [[nodiscard]] bool inputReady(const RockProviderFrameSnapshot& snapshot) noexcept
         {
@@ -235,6 +236,7 @@ namespace rpsui
                 .pixelWidth = panel.pixelWidth,
                 .pixelHeight = panel.pixelHeight,
                 .sortOrder = panel.sortOrder,
+                .flags = panel.flags,
                 .pose = panel.pose,
                 .pointerHand = panel.input.hand,
                 .hoveredResizeHandle = panel.input.hovered,
@@ -428,6 +430,7 @@ namespace rpsui
                 displayName.empty() ||
                 !dimensionsValid ||
                 !widthsValid ||
+                (registration.flags & ~7u) != 0 ||
                 !registration.renderCallback) {
                 return rpsui::sdk::ResultV1::InvalidArgument;
             }
@@ -463,6 +466,7 @@ namespace rpsui
                 .minimumPhysicalWidth = registration.minimumPhysicalWidth,
                 .maximumPhysicalWidth = registration.maximumPhysicalWidth,
                 .sortOrder = registration.sortOrder,
+                .flags = registration.flags,
                 .renderCallback = registration.renderCallback,
                 .userData = registration.userData,
             };
@@ -951,7 +955,7 @@ namespace rpsui
                             sample.ray,
                             intersectionPanel(panel.pose),
                             hit) &&
-                        hit.inside &&
+                        hit.inside && sdk::panelContains(panel.flags, hit.u, hit.v) &&
                         hit.distance < nearest) {
                         nearest = hit.distance;
                         sample.hit = hit;
@@ -1135,10 +1139,10 @@ namespace rpsui
             return;
         }
         const bool controlsPanel =
-            hit.inside ||
+            sdk::panelContains(panel->flags, hit.u, hit.v) ||
             (decision.previousPrimaryDown && decision.pressBeganOnPanel);
         const auto resizeHandle =
-            hit.inside ?
+            hit.inside && !sdk::hasPanelFlag(panel->flags, sdk::PanelFlagV1::FixedSize) ?
             panel_resize::hitTest(
                 hit.u,
                 hit.v,

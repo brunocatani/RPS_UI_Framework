@@ -47,7 +47,28 @@ namespace rpsui::sdk
         PhysicalPanelResize = 1ull << 4,
         ConsumerRenderCallbacks = 1ull << 5,
         SharedStereoComposition = 1ull << 6,
+        ShapedPanels = 1ull << 7,
     };
+
+    enum class PanelFlagV1 : std::uint32_t
+    {
+        Transparent = 1u << 0,
+        FixedSize = 1u << 1,
+        CircularInput = 1u << 2,
+    };
+
+    [[nodiscard]] constexpr bool hasPanelFlag(std::uint32_t flags, PanelFlagV1 flag) noexcept
+    {
+        return (flags & static_cast<std::uint32_t>(flag)) != 0;
+    }
+
+    [[nodiscard]] constexpr bool panelContains(std::uint32_t flags, float u, float v) noexcept
+    {
+        if (!(u >= 0 && u <= 1 && v >= 0 && v <= 1)) return false;
+        if (!hasPanelFlag(flags, PanelFlagV1::CircularInput)) return true;
+        const float x = u * 2 - 1, y = v * 2 - 1;
+        return x * x + y * y <= 1;
+    }
 
     enum class PhysicalHandV1 : std::uint32_t
     {
@@ -142,7 +163,8 @@ namespace rpsui::sdk
         float minimumPhysicalWidth{ 72.0f };
         float maximumPhysicalWidth{ 180.0f };
         std::int32_t sortOrder{ 0 };
-        std::uint32_t reserved32{ 0 };
+        // Uses the former reserved32 slot. Zero preserves rectangular opaque panels.
+        union { std::uint32_t flags{ 0 }; std::uint32_t reserved32; };
         PanelRenderCallbackV1 renderCallback{ nullptr };
         void* userData{ nullptr };
         std::uint64_t reserved[4]{};
