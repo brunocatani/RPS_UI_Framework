@@ -48,6 +48,7 @@ namespace rpsui::sdk
         ConsumerRenderCallbacks = 1ull << 5,
         SharedStereoComposition = 1ull << 6,
         ShapedPanels = 1ull << 7,
+        ConfigNavigation = 1ull << 8,
     };
 
     enum class PanelFlagV1 : std::uint32_t
@@ -55,6 +56,8 @@ namespace rpsui::sdk
         Transparent = 1u << 0,
         FixedSize = 1u << 1,
         CircularInput = 1u << 2,
+        // Opt in to raw stick handoff and grip-back. Hold-based wheels leave this unset.
+        ConfigNavigation = 1u << 3,
     };
 
     [[nodiscard]] constexpr bool hasPanelFlag(std::uint32_t flags, PanelFlagV1 flag) noexcept
@@ -143,7 +146,8 @@ namespace rpsui::sdk
         ResizeHandleV1 activeResizeHandle{ ResizeHandleV1::None };
         std::uint8_t pointerValid{ 0 };
         std::uint8_t primaryDown{ 0 };
-        std::uint8_t reservedBytes[6]{};
+        std::uint8_t backDown{ 0 }; // Gated physical grip of the pointing hand; derive edges locally.
+        std::uint8_t reservedBytes[5]{};
         std::uint64_t reserved[4]{};
     };
 

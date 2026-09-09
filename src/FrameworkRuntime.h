@@ -45,6 +45,7 @@ namespace rpsui
         float scrollAxisY{ 0.0f };
         bool pointerValid{ false };
         bool primaryDown{ false };
+        bool backDown{ false };
         std::uint64_t stateSequence{ 0 };
     };
 
@@ -133,6 +134,7 @@ namespace rpsui
             float scrollY{ 0.0f };
             bool valid{ false };
             bool primaryDown{ false };
+            bool backDown{ false };
         };
 
         struct PanelRecord
@@ -168,11 +170,17 @@ namespace rpsui
             bool rawPrimaryDown{ false };
             bool leaseAccepted{ false };
             bool submittedPrimaryDown{ false };
+            contextual_scroll::Stick stick{};
+            bool configNavigation{ false };
+            bool rawBackAvailable{ false };
+            bool rawBackDown{ false };
+            bool submittedBackDown{ false };
         };
 
         struct HandState
         {
             pointer_click_gate::State clickGate{};
+            pointer_click_gate::State backGate{};
             bool rawPrimaryPrevious{ false };
             bool gameplayPressLatched{ false };
         };

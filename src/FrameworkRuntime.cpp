@@ -48,7 +48,8 @@ namespace rpsui
             rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::PhysicalPanelResize) |
             rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::ConsumerRenderCallbacks) |
             rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::SharedStereoComposition) |
-            rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::ShapedPanels);
+            rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::ShapedPanels) |
+            rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::ConfigNavigation);
 
         [[nodiscard]] bool inputReady(const RockProviderFrameSnapshot& snapshot) noexcept
         {
@@ -248,6 +249,7 @@ namespace rpsui
                 .scrollAxisY = panel.input.scrollY,
                 .pointerValid = panel.input.valid,
                 .primaryDown = panel.input.primaryDown,
+                .backDown = panel.input.backDown,
                 .stateSequence = panel.stateSequence,
             };
         }
@@ -431,7 +433,7 @@ namespace rpsui
                 displayName.empty() ||
                 !dimensionsValid ||
                 !widthsValid ||
-                (registration.flags & ~7u) != 0 ||
+                (registration.flags & ~15u) != 0 ||
                 !registration.renderCallback) {
                 return rpsui::sdk::ResultV1::InvalidArgument;
             }
@@ -723,7 +725,7 @@ namespace rpsui
             }
             const auto initialized = RockProviderApi::initialize(
                 rock::provider::ROCK_PROVIDER_API_VERSION,
-                rock::provider::ROCK_PROVIDER_API_V1_OWNER_FRAME_CALLBACKS_TABLE_BYTES);
+                rock::provider::ROCK_PROVIDER_API_V1_RAW_WAND_THUMBSTICK_TABLE_BYTES);
             if (initialized != 0 || !RockProviderApi::inst) {
                 if (logFailure) {
                     log::warn("ROCK provider unavailable ({})", initialized);
@@ -742,7 +744,8 @@ namespace rpsui
                 !RockProviderApi::inst->registerFrameCallbackForOwnerV1 ||
                 !RockProviderApi::inst->setHandInputSuppressionV1 ||
                 !RockProviderApi::inst->clearHandInputSuppressionV1 ||
-                !RockProviderApi::inst->getRawWandButtonStateV1) {
+                !RockProviderApi::inst->getRawWandButtonStateV1 ||
+                !RockProviderApi::inst->getRawWandThumbstickV1) {
                 if (logFailure) {
                     log::warn("ROCK provider lacks required UI input capabilities");
                 }
@@ -854,6 +857,14 @@ namespace rpsui
         RockProviderHandInputSuppressionRequestV1 request{};
         request.hand = hand;
         request.flags = kSuppressionFlags;
+        // Do not let Config's Back press also acquire a world object. Existing
+        // grabs still receive their release; the hold wheel never requests this.
+        for (const auto& panel : panels_) {
+            if (panel.open && sdk::hasPanelFlag(panel.flags, sdk::PanelFlagV1::ConfigNavigation)) {
+                request.flags |= static_cast<std::uint32_t>(RockProviderHandInputSuppressionFlagV1::SuppressNormalGrabPress);
+                break;
+            }
+        }
         request.leaseFrames = kSuppressionLeaseFrames;
         request.worldGeneration = snapshot.worldGeneration;
         request.skeletonGeneration = snapshot.skeletonGeneration;
@@ -898,6 +909,7 @@ namespace rpsui
         }
         for (auto& state : handState_) {
             pointer_click_gate::reset(state.clickGate);
+            pointer_click_gate::reset(state.backGate);
             state.rawPrimaryPrevious = false;
             state.gameplayPressLatched = false;
         }
@@ -969,6 +981,16 @@ namespace rpsui
                 }
             }
 
+            const auto* hitPanel = findPanelLocked(sample.hitPanel);
+            sample.configNavigation = hitPanel && sdk::hasPanelFlag(hitPanel->flags, sdk::PanelFlagV1::ConfigNavigation);
+            if (sample.configNavigation && RockProviderApi::inst) {
+                (void)RockProviderApi::inst->getRawWandThumbstickV1(hand, &sample.stick.x, &sample.stick.y);
+                RockProviderRawWandButtonStateV1 grip{};
+                sample.rawBackAvailable = RockProviderApi::inst->getRawWandButtonStateV1(
+                    hand, static_cast<std::uint32_t>(f4cf::vrcf::k_EButton_Grip), &grip) && grip.available != 0;
+                sample.rawBackDown = sample.rawBackAvailable && grip.held != 0;
+            }
+
             RockProviderRawWandButtonStateV1 trigger{};
             RockProviderRawWandButtonStateV1 face{};
             sample.rawAvailable =
@@ -1028,6 +1050,10 @@ namespace rpsui
                     samples[index].rawAvailable,
                     samples[index].rawPrimaryDown,
                     samples[index].leaseAccepted);
+            samples[index].submittedBackDown = pointer_click_gate::advance(
+                handState_[index].backGate, snapshot.frameIndex,
+                samples[index].rawBackAvailable, samples[index].rawBackDown,
+                samples[index].leaseAccepted && samples[index].configNavigation);
         }
 
         if (activeResize_.active) {
@@ -1101,11 +1127,15 @@ namespace rpsui
             .valid = samples[0].rayValid,
             .hitsPanel = samples[0].hitPanel != 0,
             .primaryDown = samples[0].submittedPrimaryDown,
+            .navigationIntent = samples[0].submittedBackDown ||
+                contextual_scroll::remapAxis(samples[0].stick.x) != 0 || contextual_scroll::remapAxis(samples[0].stick.y) != 0,
         };
         const pointer_hand_selection::Candidate rightCandidate{
             .valid = samples[1].rayValid,
             .hitsPanel = samples[1].hitPanel != 0,
             .primaryDown = samples[1].submittedPrimaryDown,
+            .navigationIntent = samples[1].submittedBackDown ||
+                contextual_scroll::remapAxis(samples[1].stick.x) != 0 || contextual_scroll::remapAxis(samples[1].stick.y) != 0,
         };
         const auto preferred =
             snapshot.primaryHand == RockProviderHand::Left ?
@@ -1210,9 +1240,12 @@ namespace rpsui
             controlsPanel && selectedCandidate.primaryDown;
         panel->input.hovered = sdkResizeHandle(resizeHandle);
 
-        const auto stick =
+        panel->input.backDown = controlsPanel && sample.submittedBackDown;
+        const auto legacyStick =
             f4cf::vrcf::VRControllers.getThumbstickValue(
                 controllerHand(decision.hand));
+        const auto stick = sample.configNavigation ? sample.stick :
+            contextual_scroll::Stick{ legacyStick.x, legacyStick.y };
         const auto scroll = contextual_scroll::update(
             scrollState_[selectedIndex],
             controlsPanel,

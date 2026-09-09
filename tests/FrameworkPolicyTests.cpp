@@ -26,6 +26,8 @@ namespace
     {
         using namespace rpsui::sdk;
         static_assert(sizeof(PanelRegistrationV1) == 248);
+        static_assert(sizeof(PanelRenderFrameV1) == 144);
+        static_assert(offsetof(PanelRenderFrameV1, backDown) == 106);
         static_assert(offsetof(PanelRegistrationV1, flags) == 192);
         static_assert(offsetof(PanelRegistrationV1, renderCallback) == 200);
         require(RPSUI_API_VERSION == 1, "API version changed");
@@ -85,6 +87,26 @@ namespace
 
     void testClickGate()
     {
+        // Stick/back intent can transfer a hovering Config cursor, but never a drag.
+        {
+            using namespace rpsui::pointer_hand_selection;
+            State pointer{ .active = Hand::Right };
+            Candidate left{ .valid = true, .hitsPanel = true, .navigationIntent = true };
+            Candidate right{ .valid = true, .hitsPanel = true };
+            require(choose(pointer, left, right, Hand::Right).hand == Hand::Left, "left stick could not take the pointed Config panel");
+            left.hitsPanel = false;
+            require(choose(pointer, left, right, Hand::Right).hand == Hand::Right, "off-panel stick stole the cursor");
+            left.hitsPanel = true;
+            pointer.submittedPrimaryDown = true;
+            pointer.pressBeganOnPanel = true;
+            require(choose(pointer, left, right, Hand::Right).hand == Hand::Right, "stick stole a held slider drag");
+            pointer.submittedPrimaryDown = false;
+            left.navigationIntent = false;
+            require(choose(pointer, left, right, Hand::Right).hand == Hand::Right, "non-config hover changed ownership");
+            pointer.active = Hand::Left;
+            right.navigationIntent = true;
+            require(choose(pointer, left, right, Hand::Left).hand == Hand::Right, "right stick could not take the pointed Config panel");
+        }
         using namespace rpsui::pointer_click_gate;
         State state{};
         require(!advance(state, 10, true, false, true), "lease activated immediately");

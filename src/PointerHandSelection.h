@@ -16,6 +16,7 @@ namespace rpsui::pointer_hand_selection
         bool valid{ false };
         bool hitsPanel{ false };
         bool primaryDown{ false };
+        bool navigationIntent{ false }; // Only opted-in config panels publish stick/grip intent.
     };
 
     struct State
@@ -96,6 +97,11 @@ namespace rpsui::pointer_hand_selection
             return { selected, false, false };
         }
 
+        const bool leftNavigation = left.valid && left.hitsPanel && left.navigationIntent;
+        const bool rightNavigation = right.valid && right.hitsPanel && right.navigationIntent;
+        if (leftNavigation != rightNavigation) {
+            return { leftNavigation ? Hand::Left : Hand::Right, false, false };
+        }
         if (active.valid && active.hitsPanel) {
             return { state.active, false, false };
         }

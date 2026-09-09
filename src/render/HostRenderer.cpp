@@ -569,6 +569,7 @@ namespace rpsui::render
                 panel.activeResizeHandle;
             frame.pointerValid = panel.pointerValid ? 1 : 0;
             frame.primaryDown = panel.primaryDown ? 1 : 0;
+            frame.backDown = panel.backDown ? 1 : 0;
 
             try {
                 panel.renderCallback(&frame, panel.userData);
