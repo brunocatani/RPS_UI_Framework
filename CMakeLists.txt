@@ -134,6 +134,10 @@ option(RPS_UI_FRAMEWORK_BUILD_TESTS
   "Build deterministic framework contract tests." ON)
 if(RPS_UI_FRAMEWORK_BUILD_TESTS)
   enable_testing()
+  add_executable(RPSUIPanelSeparationTests tests/PanelSeparationTests.cpp)
+  target_compile_features(RPSUIPanelSeparationTests PRIVATE cxx_std_23)
+  target_include_directories(RPSUIPanelSeparationTests PRIVATE "${SOURCE_DIR}" "${SDK_INCLUDE_DIR}")
+  add_test(NAME RPSUIFramework.PanelSeparation COMMAND RPSUIPanelSeparationTests)
 
   add_executable(RPSUIFrameworkPolicyTests
     tests/FrameworkPolicyTests.cpp

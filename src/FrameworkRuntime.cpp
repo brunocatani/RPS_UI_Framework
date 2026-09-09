@@ -1,6 +1,7 @@
 #include "PCH.h"
 
 #include "FrameworkRuntime.h"
+#include "PanelSeparationPolicy.h"
 
 #include "Logger.h"
 #include "render/SceneDepthCapture.h"
@@ -567,6 +568,9 @@ namespace rpsui
     {
         for (const auto& other : panels_) {
             if (!other.open || other.panelHandle == panel.panelHandle) {
+                continue;
+            }
+            if (panel_separation::haveInPlaneGap(panel.pose, other.pose)) {
                 continue;
             }
             const float delta[3]{
