@@ -497,10 +497,11 @@ namespace rpsui::render
 
         void reportDepthState(
             Resources& state,
-            bool available) noexcept
+            const SceneDepthCapture::FrameDepth& depth,
+            const D3D11_TEXTURE2D_DESC& submittedDescription) noexcept
         {
             const auto now = std::chrono::steady_clock::now();
-            if (available) {
+            if (depth.IsValid()) {
                 if (state.depthUnavailable) {
                     state.depthUnavailable = false;
                     log::info(
@@ -512,9 +513,7 @@ namespace rpsui::render
             if (now >= state.nextDepthWarning) {
                 state.nextDepthWarning =
                     now + std::chrono::seconds(5);
-                log::warn(
-                    "RPS UI panels withheld because matching same-frame "
-                    "scene depth is unavailable");
+                SceneDepthCapture::ReportUnavailable(depth, submittedDescription);
             }
         }
 
@@ -619,7 +618,7 @@ namespace rpsui::render
             SceneDepthCapture::AcquireForSubmittedTarget(
                 texture,
                 outputDescription);
-        reportDepthState(state, depth.IsValid());
+        reportDepthState(state, depth, outputDescription);
         if (!depth.IsValid()) {
             return;
         }

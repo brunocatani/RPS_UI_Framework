@@ -11,6 +11,60 @@ namespace
 {
     std::atomic_bool g_runtimeInstalled = false;
 
+    void reportRuntimeModules() noexcept
+    {
+        // Startup only: version-resource reads must never run on a render or input callback.
+        // Report observed modules and metadata, not an inferred runtime classification.
+        for (const auto* name : { "openvr_api.dll", "vrclient_x64.dll", "openxr_loader.dll", "LibOVRRT64_1.dll" }) {
+            try {
+                const auto module = GetModuleHandleA(name);
+                if (!module) {
+                    rpsui::log::info("RPS UI runtime module: {} loaded=no", name);
+                    continue;
+                }
+                std::array<char, 32768> path{};
+                const auto length = GetModuleFileNameA(module, path.data(), static_cast<DWORD>(path.size()));
+                if (!length || length >= path.size()) {
+                    rpsui::log::warn("RPS UI runtime module: {} loaded=yes path unavailable error={}", name, GetLastError());
+                    continue;
+                }
+                std::string version = "unavailable", description = "unavailable", product = "unavailable";
+                const auto size = GetFileVersionInfoSizeA(path.data(), nullptr);
+                if (size && size <= 1024 * 1024) {
+                    std::vector<std::byte> data(size);
+                    if (GetFileVersionInfoA(path.data(), 0, size, data.data())) {
+                        void* value = nullptr;
+                        UINT bytes = 0;
+                        if (VerQueryValueA(data.data(), "\\", &value, &bytes) && value && bytes >= sizeof(VS_FIXEDFILEINFO)) {
+                            const auto& info = *static_cast<const VS_FIXEDFILEINFO*>(value);
+                            version = std::format("{}.{}.{}.{}", HIWORD(info.dwFileVersionMS), LOWORD(info.dwFileVersionMS),
+                                HIWORD(info.dwFileVersionLS), LOWORD(info.dwFileVersionLS));
+                        }
+                        struct Translation { WORD language, codePage; };
+                        if (VerQueryValueA(data.data(), "\\VarFileInfo\\Translation", &value, &bytes) && value && bytes >= sizeof(Translation)) {
+                            const auto translation = *static_cast<const Translation*>(value);
+                            const auto readString = [&](const char* key) {
+                                char query[96]{};
+                                std::snprintf(query, sizeof(query), "\\StringFileInfo\\%04x%04x\\%s",
+                                    translation.language, translation.codePage, key);
+                                void* text = nullptr; UINT characters = 0;
+                                return VerQueryValueA(data.data(), query, &text, &characters) && text && characters ?
+                                    std::string(static_cast<const char*>(text), strnlen_s(static_cast<const char*>(text), characters)) :
+                                    std::string("unavailable");
+                            };
+                            description = readString("FileDescription");
+                            product = readString("ProductName");
+                        }
+                    }
+                }
+                rpsui::log::info("RPS UI runtime module: {} path='{}' version={} description='{}' product='{}'",
+                    name, path.data(), version, description, product);
+            } catch (...) {
+                rpsui::log::warn("RPS UI runtime module diagnostics failed for {}", name);
+            }
+        }
+    }
+
     void reportBoundaryFailure(
         const char* boundary,
         const char* detail) noexcept
@@ -41,6 +95,8 @@ namespace
                 std::memory_order_acq_rel)) {
             return;
         }
+
+        reportRuntimeModules();
 
         if (!rpsui::render::SceneDepthCapture::Install()) {
             rpsui::log::critical(
