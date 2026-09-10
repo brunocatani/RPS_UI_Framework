@@ -587,7 +587,6 @@ namespace rpsui::render
         if (!texture) {
             return;
         }
-        SceneDepthCapture::SetSubmittedTarget(texture);
         auto panels =
             FrameworkRuntime::get().snapshotRenderPanels();
         if (panels.empty()) {

@@ -3,6 +3,7 @@
 #include "Logger.h"
 
 #include "render/SceneDepthCapture.h"
+#include "render/NativeSceneTargets.h"
 
 #include <array>
 
@@ -38,7 +39,6 @@ namespace rpsui::render::SceneDepthCapture
 
         struct Capture
         {
-            Microsoft::WRL::ComPtr<IUnknown> colorIdentity;
             Microsoft::WRL::ComPtr<ID3D11DepthStencilView>
                 originalView;
             Microsoft::WRL::ComPtr<ID3D11DepthStencilView>
@@ -49,19 +49,19 @@ namespace rpsui::render::SceneDepthCapture
             D3D11_COMPARISON_FUNC comparison =
                 D3D11_COMPARISON_LESS_EQUAL;
             std::uint64_t frameEpoch = 0;
+            std::uint32_t logicalDepth = 0;
         };
 
         std::mutex g_lifecycleMutex;
         std::mutex g_captureMutex;
-        std::mutex g_targetsMutex;
         std::atomic<bool> g_installed = false;
         std::atomic<bool> g_requested = false;
         std::atomic<std::uint64_t> g_frameEpoch = 1;
         std::atomic<std::uint64_t> g_capturedEpoch = 0;
         enum class CaptureStage : std::size_t
         {
-            Attempt, AlreadyCaptured, NoContext, NoColorView, NoDepthView,
-            NoColorTexture, UnknownColor, NoDepthTexture, LayoutMismatch,
+            Attempt, AlreadyCaptured, NoContext, NoDepthView,
+            NoDepthTexture, NativeTargetsUnavailable, NonSceneDepth,
             NoDepthState, DepthDisabled, ReadOnlyViewFailed, EpochChanged,
             Captured, Count
         };
@@ -69,23 +69,11 @@ namespace rpsui::render::SceneDepthCapture
         // relaxed diagnostics only; capture ownership and validity are unchanged.
         std::array<std::atomic<std::uint64_t>, static_cast<std::size_t>(CaptureStage::Count)> g_stageCounts{};
         std::atomic<HRESULT> g_readOnlyViewError{ S_OK };
-        std::atomic<std::uint64_t> g_submittedTargetMisses = 0;
         std::atomic<bool> g_reportedDepthMatch = false;
-        struct RejectedPair
-        {
-            std::uintptr_t colorIdentity = 0; // Diagnostic value, never dereferenced.
-            D3D11_TEXTURE2D_DESC color{}, depth{};
-            D3D11_DEPTH_STENCIL_VIEW_DESC view{};
-            D3D11_DEPTH_STENCIL_DESC state{};
-        };
-        enum class PairReason : std::size_t { UnknownColor, LayoutMismatch, DepthDisabled, Count };
-        std::array<RejectedPair, static_cast<std::size_t>(PairReason::Count)> g_rejectedPairs{}; // g_captureMutex
-        std::atomic<std::uint32_t> g_sampledPairs = 0;
+        std::atomic<const char*> g_nativeFailureStage{ "none" };
         std::uintptr_t g_callsite = 0;
         CommitGraphicsState g_original = nullptr;
         Capture g_capture;
-        std::array<Microsoft::WRL::ComPtr<IUnknown>, 3>
-            g_submittedTargets{};
 
         template <std::size_t Size>
         [[nodiscard]] bool MatchesReadable(
@@ -142,45 +130,43 @@ namespace rpsui::render::SceneDepthCapture
                        rightIdentity.Get();
         }
 
-        [[nodiscard]] bool KnownSubmittedTarget(
-            IUnknown* identity) noexcept
+        bool ReadNative(std::uintptr_t address, void* destination, std::size_t size) noexcept
         {
-            if (!identity) {
-                return false;
-            }
-            std::lock_guard lock(g_targetsMutex);
-            return std::any_of(
-                g_submittedTargets.begin(),
-                g_submittedTargets.end(),
-                [identity](const auto& candidate) {
-                    return candidate.Get() == identity;
-                });
+            SIZE_T copied = 0;
+            return ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(address),
+                destination, size, &copied) && copied == size;
+        }
+
+        bool ValidateNativeSceneLayout() noexcept
+        {
+            const auto base = REL::Module::get().base();
+            const auto matches = [base](std::uintptr_t rva, const auto& bytes) {
+                return MatchesReadable(reinterpret_cast<const void*>(base + rva), bytes);
+            };
+            // Guard the exact map readers, scene-depth selector, data-array
+            // extents and renderer-data root before any new native pointer walk.
+            return matches(0x1DBB4D0, std::array<std::uint8_t,11>{
+                0x48,0x63,0xC2,0x8B,0x84,0x81,0xBC,0x13,0x00,0x00,0xC3}) &&
+                matches(0x1DBB4F0, std::array<std::uint8_t,11>{
+                0x48,0x63,0xC2,0x8B,0x84,0x81,0xFC,0x15,0x00,0x00,0xC3}) &&
+                matches(0x1D947D0, std::array<std::uint8_t,5>{0x0F,0xB6,0x41,0x04,0xC3}) &&
+                matches(0x291B30F, std::array<std::uint8_t,52>{
+                0x48,0x8D,0x0D,0x2A,0xE0,0x91,0x03,0xE8,0xB5,0x94,0x47,0xFF,0x41,0xB8,0x01,0x00,
+                0x00,0x00,0x48,0x8D,0x4D,0xC0,0x84,0xC0,0xB8,0x0C,0x00,0x00,0x00,0x89,0x74,0x24,
+                0x28,0x44,0x0F,0x45,0xC0,0x8D,0x50,0xFB,0x45,0x33,0xC9,0x89,0x74,0x24,0x20,0xE8,
+                0x7D,0x48,0x01,0x00}) &&
+                matches(0x1DA2A49, std::array<std::uint8_t,40>{
+                0x48,0x8D,0x8B,0x58,0x0A,0x00,0x00,0x33,0xD2,0x41,0xB8,0x30,0x1B,0x00,0x00,0xE8,
+                0xC9,0xEB,0xBE,0x00,0x48,0x8D,0x8B,0x88,0x25,0x00,0x00,0x33,0xD2,0x41,0xB8,0xB0,
+                0x0A,0x00,0x00,0xE8,0xB5,0xEB,0xBE,0x00}) &&
+                matches(0x2B23EE6, std::array<std::uint8_t,29>{
+                0x48,0x8D,0x1D,0x63,0x54,0x71,0x03,0x48,0x8B,0xCB,0xE8,0xEB,0xEA,0x27,0xFF,0x48,
+                0x8B,0x05,0xCC,0x1B,0x71,0x03,0x48,0x89,0x1D,0xE5,0xFD,0x5C,0x03});
         }
 
         void Count(CaptureStage stage) noexcept
         {
             g_stageCounts[static_cast<std::size_t>(stage)].fetch_add(1, std::memory_order_relaxed);
-        }
-
-        void SampleRejectedPair(PairReason reason, IUnknown* colorIdentity,
-            ID3D11Texture2D* color, ID3D11DepthStencilView* depthView,
-            const D3D11_DEPTH_STENCIL_DESC* depthState = nullptr) noexcept
-        {
-            const auto index = static_cast<std::size_t>(reason);
-            const auto bit = std::uint32_t{ 1 } << index;
-            // At most one sample per rejection kind between warning emissions.
-            if ((g_sampledPairs.fetch_or(bit, std::memory_order_relaxed) & bit) != 0) return;
-            RejectedPair sample;
-            sample.colorIdentity = reinterpret_cast<std::uintptr_t>(colorIdentity);
-            color->GetDesc(&sample.color);
-            depthView->GetDesc(&sample.view);
-            if (depthState) sample.state = *depthState;
-            Microsoft::WRL::ComPtr<ID3D11Resource> resource;
-            Microsoft::WRL::ComPtr<ID3D11Texture2D> depth;
-            depthView->GetResource(resource.GetAddressOf());
-            if (resource && SUCCEEDED(resource.As(&depth)) && depth) depth->GetDesc(&sample.depth);
-            std::lock_guard lock(g_captureMutex);
-            g_rejectedPairs[index] = sample;
         }
 
         [[nodiscard]] bool DepthExtent(
@@ -315,40 +301,14 @@ namespace rpsui::render::SceneDepthCapture
                 return;
             }
 
-            Microsoft::WRL::ComPtr<ID3D11RenderTargetView>
-                colorView;
             Microsoft::WRL::ComPtr<ID3D11DepthStencilView>
                 depthView;
             context->OMGetRenderTargets(
-                1,
-                colorView.GetAddressOf(),
+                0,
+                nullptr,
                 depthView.GetAddressOf());
-            if (!colorView) {
-                Count(CaptureStage::NoColorView);
-                return;
-            }
             if (!depthView) {
                 Count(CaptureStage::NoDepthView);
-                return;
-            }
-
-            Microsoft::WRL::ComPtr<ID3D11Resource>
-                colorResource;
-            colorView->GetResource(
-                colorResource.GetAddressOf());
-            Microsoft::WRL::ComPtr<ID3D11Texture2D>
-                colorTexture;
-            if (!colorResource ||
-                FAILED(colorResource.As(&colorTexture)) ||
-                !colorTexture) {
-                Count(CaptureStage::NoColorTexture);
-                return;
-            }
-            const auto colorIdentity =
-                Identity(colorTexture.Get());
-            if (!KnownSubmittedTarget(colorIdentity.Get())) {
-                Count(CaptureStage::UnknownColor);
-                SampleRejectedPair(PairReason::UnknownColor, colorIdentity.Get(), colorTexture.Get(), depthView.Get());
                 return;
             }
 
@@ -365,21 +325,22 @@ namespace rpsui::render::SceneDepthCapture
                 return;
             }
 
-            D3D11_TEXTURE2D_DESC colorDescription{};
-            D3D11_TEXTURE2D_DESC depthDescription{};
-            D3D11_DEPTH_STENCIL_VIEW_DESC viewDescription{};
-            colorTexture->GetDesc(&colorDescription);
-            depthTexture->GetDesc(&depthDescription);
-            depthView->GetDesc(&viewDescription);
-            if (!LayoutMatches(
-                    depthDescription,
-                    viewDescription,
-                    colorDescription)) {
-                Count(CaptureStage::LayoutMismatch);
-                SampleRejectedPair(PairReason::LayoutMismatch, colorIdentity.Get(), colorTexture.Get(), depthView.Get());
+            native_scene_targets::Snapshot scene;
+            if (!native_scene_targets::readDepth(REL::Module::get().base(), ReadNative, scene)) {
+                Count(CaptureStage::NativeTargetsUnavailable);
+                g_nativeFailureStage.store(scene.stage, std::memory_order_relaxed);
                 return;
             }
-
+            // The final VR color target may never be bound with depth (SteamVR).
+            // Select by the engine's scene-depth role, not color identity or size.
+            if (reinterpret_cast<std::uintptr_t>(depthTexture.Get()) != scene.depthTexture) {
+                Count(CaptureStage::NonSceneDepth);
+                return;
+            }
+            D3D11_TEXTURE2D_DESC depthDescription{};
+            D3D11_DEPTH_STENCIL_VIEW_DESC viewDescription{};
+            depthTexture->GetDesc(&depthDescription);
+            depthView->GetDesc(&viewDescription);
             Microsoft::WRL::ComPtr<ID3D11DepthStencilState>
                 depthState;
             UINT stencilReference = 0;
@@ -401,7 +362,6 @@ namespace rpsui::render::SceneDepthCapture
             if (stateDescription.DepthEnable == FALSE ||
                 !usableComparison) {
                 Count(CaptureStage::DepthDisabled);
-                SampleRejectedPair(PairReason::DepthDisabled, colorIdentity.Get(), colorTexture.Get(), depthView.Get(), &stateDescription);
                 return;
             }
 
@@ -433,7 +393,6 @@ namespace rpsui::render::SceneDepthCapture
                     Count(CaptureStage::EpochChanged);
                     return;
                 }
-                g_capture.colorIdentity = colorIdentity;
                 g_capture.originalView = depthView;
                 g_capture.readOnlyView = readOnly;
                 g_capture.texture = depthTexture;
@@ -443,6 +402,7 @@ namespace rpsui::render::SceneDepthCapture
                     viewDescription;
                 g_capture.comparison = comparison;
                 g_capture.frameEpoch = epoch;
+                g_capture.logicalDepth = scene.logicalDepth;
             }
             g_capturedEpoch.store(
                 epoch,
@@ -475,6 +435,10 @@ namespace rpsui::render::SceneDepthCapture
 
         bool patched = false;
         try {
+            if (!ValidateNativeSceneLayout()) {
+                log::critical("RPS UI native scene-depth layout byte guards failed; capture disabled");
+                return false;
+            }
             const REL::Relocation<std::uintptr_t> callsite{
                 REL::Offset(kCaptureCallsiteRva)
             };
@@ -553,41 +517,6 @@ namespace rpsui::render::SceneDepthCapture
         }
     }
 
-    void SetSubmittedTarget(
-        ID3D11Texture2D* texture) noexcept
-    {
-        auto identity = Identity(texture);
-        if (!identity) {
-            return;
-        }
-        std::lock_guard lock(g_targetsMutex);
-        std::size_t existing = g_submittedTargets.size();
-        for (std::size_t index = 0;
-             index < g_submittedTargets.size();
-             ++index) {
-            if (g_submittedTargets[index].Get() ==
-                identity.Get()) {
-                existing = index;
-                break;
-            }
-        }
-        if (existing == 0) {
-            return;
-        }
-        if (existing == g_submittedTargets.size())
-            g_submittedTargetMisses.fetch_add(1, std::memory_order_relaxed);
-        const auto last = (std::min)(
-            existing,
-            g_submittedTargets.size() - 1);
-        for (std::size_t index = last;
-             index > 0;
-             --index) {
-            g_submittedTargets[index] =
-                g_submittedTargets[index - 1];
-        }
-        g_submittedTargets[0] = std::move(identity);
-    }
-
     FrameDepth AcquireForSubmittedTarget(
         ID3D11Texture2D* colorTexture,
         const D3D11_TEXTURE2D_DESC& colorDescription) noexcept
@@ -604,11 +533,10 @@ namespace rpsui::render::SceneDepthCapture
             snapshot = g_capture;
         }
         result.frameEpoch = snapshot.frameEpoch;
-        const auto colorIdentity = Identity(colorTexture);
-        result.submittedColorIdentity = reinterpret_cast<std::uintptr_t>(colorIdentity.Get());
+        result.submittedTexture = reinterpret_cast<std::uintptr_t>(colorTexture);
+        result.capturedDepth = reinterpret_cast<std::uintptr_t>(snapshot.texture.Get());
         result.requestedFrameEpoch = g_frameEpoch.load(std::memory_order_acquire);
-        if (!snapshot.colorIdentity ||
-            !snapshot.readOnlyView ||
+        if (!snapshot.readOnlyView ||
             !snapshot.texture) {
             result.failureReason = "no-capture";
             return result;
@@ -618,10 +546,22 @@ namespace rpsui::render::SceneDepthCapture
             return result;
         }
 
-        if (!colorIdentity ||
-            colorIdentity.Get() !=
-                snapshot.colorIdentity.Get()) {
-            result.failureReason = "different-color-target";
+        native_scene_targets::Snapshot scene;
+        const auto base = REL::Module::get().base();
+        if (!native_scene_targets::readDepth(base, ReadNative, scene) ||
+            !native_scene_targets::readColor(base, ReadNative, scene)) {
+            result.failureReason = scene.stage;
+            return result;
+        }
+        result.expectedColor = scene.colorTexture;
+        result.expectedDepth = scene.depthTexture;
+        result.logicalDepth = scene.logicalDepth;
+        if (result.submittedTexture != scene.colorTexture) {
+            result.failureReason = "not-native-vr-color";
+            return result;
+        }
+        if (result.capturedDepth != scene.depthTexture || snapshot.logicalDepth != scene.logicalDepth) {
+            result.failureReason = "scene-depth-changed";
             return result;
         }
         if (!LayoutMatches(
@@ -649,9 +589,9 @@ namespace rpsui::render::SceneDepthCapture
         result.frameEpoch = snapshot.frameEpoch;
         result.failureReason = nullptr;
         if (!g_reportedDepthMatch.exchange(true, std::memory_order_relaxed)) {
-            log::info("RPS UI first depth match: epoch={} color=0x{:X} submitted={}x{} format={} samples={}/{} "
+            log::info("RPS UI first depth match: epoch={} color=0x{:X} sceneDepthLogical={} depth=0x{:X} submitted={}x{} format={} samples={}/{} "
                 "depth={}x{} format={} samples={}/{} viewDimension={} depthFunc={}",
-                result.frameEpoch, result.submittedColorIdentity,
+                result.frameEpoch, result.submittedTexture, scene.logicalDepth, result.capturedDepth,
                 colorDescription.Width, colorDescription.Height, static_cast<unsigned>(colorDescription.Format),
                 colorDescription.SampleDesc.Count, colorDescription.SampleDesc.Quality,
                 snapshot.textureDescription.Width, snapshot.textureDescription.Height,
@@ -668,48 +608,25 @@ namespace rpsui::render::SceneDepthCapture
         std::array<std::uint64_t, static_cast<std::size_t>(CaptureStage::Count)> counts{};
         for (std::size_t i = 0; i < counts.size(); ++i)
             counts[i] = g_stageCounts[i].load(std::memory_order_relaxed);
-        decltype(g_rejectedPairs) pairs;
-        { std::lock_guard lock(g_captureMutex); pairs = g_rejectedPairs; g_rejectedPairs = {}; }
-        g_sampledPairs.store(0, std::memory_order_relaxed);
         const auto count = [&](CaptureStage stage) { return counts[static_cast<std::size_t>(stage)]; };
         log::warn("RPS UI panels withheld: scene depth unavailable reason={} submitEpoch={} captureEpoch={} "
             "submittedColor=0x{:X} submitted={}x{} format={} samples={}/{}",
             depth.failureReason, depth.requestedFrameEpoch, depth.frameEpoch,
-            depth.submittedColorIdentity,
+            depth.submittedTexture,
             submittedDescription.Width, submittedDescription.Height, static_cast<unsigned>(submittedDescription.Format),
             submittedDescription.SampleDesc.Count, submittedDescription.SampleDesc.Quality);
-        log::warn("RPS UI depth capture totals: attempts={} alreadyCaptured={} noContext={} noColorView={} "
-            "noDepthView={} noColorTexture={} unknownColor={} noDepthTexture={} layoutMismatch={} noDepthState={} "
+        log::warn("RPS UI depth capture totals: attempts={} alreadyCaptured={} noContext={} "
+            "noDepthView={} noDepthTexture={} nativeTargetsUnavailable={} nonSceneDepth={} noDepthState={} "
             "depthDisabled={} readOnlyViewFailed={} epochChanged={} captured={} readOnlyHRESULT=0x{:08X}",
             count(CaptureStage::Attempt), count(CaptureStage::AlreadyCaptured), count(CaptureStage::NoContext),
-            count(CaptureStage::NoColorView), count(CaptureStage::NoDepthView), count(CaptureStage::NoColorTexture),
-            count(CaptureStage::UnknownColor), count(CaptureStage::NoDepthTexture), count(CaptureStage::LayoutMismatch),
+            count(CaptureStage::NoDepthView), count(CaptureStage::NoDepthTexture),
+            count(CaptureStage::NativeTargetsUnavailable), count(CaptureStage::NonSceneDepth),
             count(CaptureStage::NoDepthState), count(CaptureStage::DepthDisabled), count(CaptureStage::ReadOnlyViewFailed),
             count(CaptureStage::EpochChanged), count(CaptureStage::Captured),
             static_cast<std::uint32_t>(g_readOnlyViewError.load(std::memory_order_relaxed)));
-        std::array<std::uintptr_t, 3> targets{};
-        { std::lock_guard lock(g_targetsMutex);
-          for (std::size_t i = 0; i < targets.size(); ++i)
-              targets[i] = reinterpret_cast<std::uintptr_t>(g_submittedTargets[i].Get()); }
-        log::warn("RPS UI submitted target history: cacheMisses={} recent=0x{:X},0x{:X},0x{:X}",
-            g_submittedTargetMisses.load(std::memory_order_relaxed), targets[0], targets[1], targets[2]);
-        constexpr std::array names{ "unknown-color", "layout-mismatch", "depth-disabled" };
-        for (std::size_t i = 0; i < pairs.size(); ++i) {
-            const auto& sample = pairs[i];
-            if (!sample.colorIdentity) continue;
-            std::uint32_t viewWidth = 0, viewHeight = 0;
-            const bool extentValid = DepthExtent(sample.depth, sample.view, viewWidth, viewHeight);
-            log::warn("RPS UI depth rejected sample: reason={} color=0x{:X} {}x{} format={} samples={}/{} "
-                "depth={}x{} format={} samples={}/{} mips={} arraySize={} viewFormat={} viewDimension={} "
-                "viewExtent={}x{} extentValid={} depthStateSampled={} depthEnable={} depthFunc={}",
-                names[i], sample.colorIdentity, sample.color.Width, sample.color.Height,
-                static_cast<unsigned>(sample.color.Format), sample.color.SampleDesc.Count, sample.color.SampleDesc.Quality,
-                sample.depth.Width, sample.depth.Height, static_cast<unsigned>(sample.depth.Format),
-                sample.depth.SampleDesc.Count, sample.depth.SampleDesc.Quality, sample.depth.MipLevels, sample.depth.ArraySize,
-                static_cast<unsigned>(sample.view.Format), static_cast<unsigned>(sample.view.ViewDimension),
-                viewWidth, viewHeight, extentValid, i == static_cast<std::size_t>(PairReason::DepthDisabled),
-                sample.state.DepthEnable, static_cast<unsigned>(sample.state.DepthFunc));
-        }
+        log::warn("RPS UI native scene depth: captureStage={} logical={} captured=0x{:X} expected=0x{:X} expectedColor=0x{:X}",
+            g_nativeFailureStage.load(std::memory_order_relaxed), depth.logicalDepth,
+            depth.capturedDepth, depth.expectedDepth, depth.expectedColor);
     }
 
     void AdvanceSubmittedFrame() noexcept
@@ -722,10 +639,6 @@ namespace rpsui::render::SceneDepthCapture
         g_requested.store(false, std::memory_order_release);
         g_frameEpoch.fetch_add(1, std::memory_order_acq_rel);
         g_capturedEpoch.store(0, std::memory_order_release);
-        {
-            std::lock_guard lock(g_targetsMutex);
-            g_submittedTargets = {};
-        }
         std::lock_guard lock(g_captureMutex);
         g_capture = {};
     }

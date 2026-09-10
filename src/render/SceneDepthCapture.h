@@ -14,7 +14,9 @@ namespace rpsui::render::SceneDepthCapture
             D3D11_COMPARISON_LESS_EQUAL;
         std::uint64_t frameEpoch = 0;
         std::uint64_t requestedFrameEpoch = 0;
-        std::uintptr_t submittedColorIdentity = 0;
+        std::uintptr_t submittedTexture = 0;
+        std::uintptr_t expectedColor = 0, expectedDepth = 0, capturedDepth = 0;
+        std::uint32_t logicalDepth = 0;
         const char* failureReason = "capture-not-requested";
 
         [[nodiscard]] bool IsValid() const noexcept
@@ -29,7 +31,6 @@ namespace rpsui::render::SceneDepthCapture
     [[nodiscard]] bool IsInstalled() noexcept;
     void Uninstall() noexcept;
     void SetCaptureRequested(bool requested) noexcept;
-    void SetSubmittedTarget(ID3D11Texture2D* texture) noexcept;
     [[nodiscard]] FrameDepth AcquireForSubmittedTarget(
         ID3D11Texture2D* colorTexture,
         const D3D11_TEXTURE2D_DESC& colorDescription) noexcept;
