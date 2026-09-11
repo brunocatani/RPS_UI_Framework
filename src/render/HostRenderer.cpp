@@ -55,6 +55,11 @@ namespace rpsui::render
             std::uint64_t deviceGeneration{ 0 };
             std::chrono::steady_clock::time_point lastFrame{};
             std::chrono::steady_clock::time_point nextDepthWarning{};
+            std::array<std::uint64_t, 9> observedComparisons{};
+            std::uint64_t comparisonChanges = 0;
+            std::uint64_t observedDepthEpoch = 0;
+            std::uint64_t reportedDiagnosticEpoch = 0;
+            D3D11_COMPARISON_FUNC previousComparison = D3D11_COMPARISON_NEVER;
             std::mutex renderMutex;
         };
 
@@ -81,6 +86,11 @@ namespace rpsui::render
             state.context.Reset();
             state.device.Reset();
             state.initialized = false;
+            state.observedComparisons = {};
+            state.comparisonChanges = 0;
+            state.observedDepthEpoch = 0;
+            state.reportedDiagnosticEpoch = 0;
+            state.previousComparison = D3D11_COMPARISON_NEVER;
         }
 
         [[nodiscard]] bool initialize(
@@ -517,6 +527,98 @@ namespace rpsui::render
             }
         }
 
+        void reportProjection(const char* phase, std::uint64_t epoch,
+            const StereoProjection::Snapshot& projection) noexcept
+        {
+            for (std::size_t eye = 0; eye < 2; ++eye) {
+                const auto& o = projection.origin[eye];
+                const auto& m = projection.composite[eye];
+                log::info("RPS UI occlusion projection: epoch={} phase={} eye={} root=0x{:X} records=0x{:X} "
+                    "origin=({:.7g},{:.7g},{:.7g}) matrixRows=[{:.7g},{:.7g},{:.7g},{:.7g};"
+                    "{:.7g},{:.7g},{:.7g},{:.7g};{:.7g},{:.7g},{:.7g},{:.7g};{:.7g},{:.7g},{:.7g},{:.7g}]",
+                    epoch, phase, eye, projection.sourceRoot, projection.sourceRecords, o.x, o.y, o.z,
+                    m._11, m._12, m._13, m._14, m._21, m._22, m._23, m._24,
+                    m._31, m._32, m._33, m._34, m._41, m._42, m._43, m._44);
+            }
+        }
+
+        bool reportOcclusionSample(Resources& state, const SceneDepthCapture::FrameDepth& depth,
+            const D3D11_TEXTURE2D_DESC& output, const StereoProjection::Snapshot* projection) noexcept
+        {
+            // Count every accepted epoch so a brief comparison change is visible
+            // even between the one-second samples. All state owns renderMutex.
+            if (state.observedDepthEpoch != depth.frameEpoch) {
+                if (state.observedDepthEpoch && state.previousComparison != depth.comparison)
+                    ++state.comparisonChanges;
+                state.observedDepthEpoch = depth.frameEpoch;
+                state.previousComparison = depth.comparison;
+                ++state.observedComparisons[static_cast<std::size_t>(depth.comparison)];
+            }
+            if (!depth.diagnostic || state.reportedDiagnosticEpoch == depth.frameEpoch) return false;
+            state.reportedDiagnosticEpoch = depth.frameEpoch;
+            const auto& sample = *depth.diagnostic;
+            const auto& counts = state.observedComparisons;
+            log::info("RPS UI occlusion sample v1: epoch={} logicalDepth={} depth=0x{:X} submittedColor=0x{:X} "
+                "output={}x{} depthFunc={} sourceWriteMask={} sourceViewFlags={} sourceStencil={} "
+                "comparisonChanges={} framesByFunc[1..8]=[{},{},{},{},{},{},{},{}] "
+                "sourceVS=0x{:X} sourceColor=0x{:X} sourceColorSize={}x{} sourceColorFormat={} "
+                "captureProjectionValid={} captureProjectionStage={} captureProjectionError={} submitProjectionValid={}",
+                depth.frameEpoch, depth.logicalDepth, depth.capturedDepth, depth.submittedTexture,
+                output.Width, output.Height, static_cast<unsigned>(depth.comparison),
+                static_cast<unsigned>(depth.sourceWriteMask), depth.sourceViewFlags, depth.sourceStencilEnabled,
+                state.comparisonChanges, counts[1], counts[2], counts[3], counts[4], counts[5], counts[6], counts[7], counts[8],
+                sample.vertexShader, sample.colorTexture, sample.colorDescription.Width, sample.colorDescription.Height,
+                static_cast<unsigned>(sample.colorDescription.Format), sample.projectionValid,
+                static_cast<unsigned>(sample.projectionFailure.stage), sample.projectionFailure.win32Error, projection != nullptr);
+            state.observedComparisons = {};
+            state.comparisonChanges = 0;
+            const auto count = (std::min)(sample.viewportCount, static_cast<UINT>(sample.viewports.size()));
+            log::info("RPS UI occlusion viewports: epoch={} captureCount={} UI=two-horizontal-halves UIdepthRange=[0,1]",
+                depth.frameEpoch, sample.viewportCount);
+            for (UINT index = 0; index < count; ++index) {
+                const auto& v = sample.viewports[index];
+                log::info("RPS UI occlusion viewport: epoch={} index={} xy=({},{}) size=({},{}) depthRange=[{},{}]",
+                    depth.frameEpoch, index, v.TopLeftX, v.TopLeftY, v.Width, v.Height, v.MinDepth, v.MaxDepth);
+            }
+            if (sample.projectionValid) reportProjection("capture", depth.frameEpoch, sample.projection);
+            if (projection) reportProjection("submit", depth.frameEpoch, *projection);
+            return true;
+        }
+
+        void reportPanelProjection(const RenderPanelSnapshot& panel, const StereoProjection::Snapshot& projection,
+            std::uint64_t epoch, bool drawn) noexcept
+        {
+            log::info("RPS UI occlusion panel: epoch={} panel={} drawn={} center=({:.7g},{:.7g},{:.7g}) "
+                "right=({:.7g},{:.7g},{:.7g}) up=({:.7g},{:.7g},{:.7g}) size=({},{})",
+                epoch, panel.panelHandle, drawn, panel.pose.center[0], panel.pose.center[1], panel.pose.center[2],
+                panel.pose.right[0], panel.pose.right[1], panel.pose.right[2],
+                panel.pose.up[0], panel.pose.up[1], panel.pose.up[2], panel.pose.physicalWidth, panel.pose.physicalHeight);
+            for (std::size_t eye = 0; eye < 2; ++eye) {
+                const auto& origin = projection.origin[eye];
+                const auto matrix = DirectX::XMLoadFloat4x4(&projection.composite[eye]);
+                const auto clipAt = [&](float scale) {
+                    const auto relative = DirectX::XMVectorSet(
+                        (panel.pose.center[0] - origin.x) * scale,
+                        (panel.pose.center[1] - origin.y) * scale,
+                        (panel.pose.center[2] - origin.z) * scale, 1.0f);
+                    DirectX::XMFLOAT4 clip;
+                    DirectX::XMStoreFloat4(&clip, DirectX::XMVector4Transform(relative, matrix));
+                    return clip;
+                };
+                const auto ndcDepth = [](const DirectX::XMFLOAT4& clip) {
+                    return std::fabs(clip.w) > 1.0e-7f ? clip.z / clip.w :
+                        std::numeric_limits<float>::quiet_NaN();
+                };
+                const auto center = clipAt(1.0f);
+                // Raw probes along the eye-to-panel ray expose the projection's
+                // depth direction without assuming ordinary or reversed Z.
+                log::info("RPS UI occlusion panel clip: epoch={} panel={} eye={} centerXYZW=({:.7g},{:.7g},{:.7g},{:.7g}) "
+                    "rayDepth[half,center,double]=[{:.7g},{:.7g},{:.7g}]",
+                    epoch, panel.panelHandle, eye, center.x, center.y, center.z, center.w,
+                    ndcDepth(clipAt(0.5f)), ndcDepth(center), ndcDepth(clipAt(2.0f)));
+            }
+        }
+
         [[nodiscard]] bool renderConsumerPanel(
             Resources& state,
             const RenderPanelSnapshot& panel,
@@ -623,7 +725,10 @@ namespace rpsui::render
         }
 
         StereoProjection::Snapshot projection{};
-        if (!StereoProjection::CaptureSnapshot(projection)) {
+        const bool projectionValid = StereoProjection::CaptureSnapshot(projection);
+        const bool traceSample = reportOcclusionSample(state, depth, outputDescription,
+            projectionValid ? &projection : nullptr);
+        if (!projectionValid) {
             return;
         }
 
@@ -640,6 +745,7 @@ namespace rpsui::render
         for (const auto& panel : panels) {
             auto* gpu = ensurePanelGpu(state, panel);
             if (!gpu) {
+                if (traceSample) reportPanelProjection(panel, projection, depth.frameEpoch, false);
                 continue;
             }
             if (!renderConsumerPanel(
@@ -647,15 +753,17 @@ namespace rpsui::render
                     panel,
                     *gpu,
                     deltaSeconds)) {
+                if (traceSample) reportPanelProjection(panel, projection, depth.frameEpoch, false);
                 continue;
             }
-            (void)drawWorldPanel(
+            const bool drawn = drawWorldPanel(
                 state,
                 panel,
                 gpu->shaderResource.Get(),
                 projection,
                 depth,
                 outputDescription);
+            if (traceSample) reportPanelProjection(panel, projection, depth.frameEpoch, drawn);
         }
 
         for (auto it = state.panelGpu.begin();

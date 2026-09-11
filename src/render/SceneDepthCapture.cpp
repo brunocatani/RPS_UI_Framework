@@ -50,6 +50,9 @@ namespace rpsui::render::SceneDepthCapture
                 D3D11_COMPARISON_LESS_EQUAL;
             std::uint64_t frameEpoch = 0;
             std::uint32_t logicalDepth = 0;
+            D3D11_DEPTH_WRITE_MASK writeMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+            bool stencilEnabled = false;
+            std::optional<CaptureDiagnostic> diagnostic;
         };
 
         std::mutex g_lifecycleMutex;
@@ -74,6 +77,9 @@ namespace rpsui::render::SceneDepthCapture
         std::uintptr_t g_callsite = 0;
         CommitGraphicsState g_original = nullptr;
         Capture g_capture;
+        // Protected by g_captureMutex. Sampling reads state only; it never
+        // changes depth selection or supplies a projection to the renderer.
+        std::chrono::steady_clock::time_point g_nextDiagnostic{};
 
         template <std::size_t Size>
         [[nodiscard]] bool MatchesReadable(
@@ -367,11 +373,17 @@ namespace rpsui::render::SceneDepthCapture
 
             Microsoft::WRL::ComPtr<ID3D11DepthStencilView>
                 readOnly;
+            bool sampleDiagnostic = false;
             {
                 std::lock_guard lock(g_captureMutex);
                 if (g_capture.originalView.Get() ==
                     depthView.Get()) {
                     readOnly = g_capture.readOnlyView;
+                }
+                const auto now = std::chrono::steady_clock::now();
+                if (now >= g_nextDiagnostic) {
+                    sampleDiagnostic = true;
+                    g_nextDiagnostic = now + std::chrono::seconds(1);
                 }
             }
             if (!readOnly) {
@@ -382,6 +394,29 @@ namespace rpsui::render::SceneDepthCapture
             if (!readOnly) {
                 Count(CaptureStage::ReadOnlyViewFailed);
                 return;
+            }
+
+            std::optional<CaptureDiagnostic> diagnostic;
+            if (sampleDiagnostic) {
+                auto& sample = diagnostic.emplace();
+                sample.projectionValid = StereoProjection::ReadSnapshot(
+                    sample.projection, sample.projectionFailure);
+                sample.viewportCount = static_cast<UINT>(sample.viewports.size());
+                context->RSGetViewports(&sample.viewportCount, sample.viewports.data());
+                Microsoft::WRL::ComPtr<ID3D11VertexShader> vertexShader;
+                context->VSGetShader(vertexShader.GetAddressOf(), nullptr, nullptr);
+                sample.vertexShader = reinterpret_cast<std::uintptr_t>(vertexShader.Get());
+                Microsoft::WRL::ComPtr<ID3D11RenderTargetView> colorView;
+                context->OMGetRenderTargets(1, colorView.GetAddressOf(), nullptr);
+                if (colorView) {
+                    Microsoft::WRL::ComPtr<ID3D11Resource> colorResource;
+                    colorView->GetResource(colorResource.GetAddressOf());
+                    Microsoft::WRL::ComPtr<ID3D11Texture2D> colorTexture;
+                    if (colorResource && SUCCEEDED(colorResource.As(&colorTexture)) && colorTexture) {
+                        sample.colorTexture = reinterpret_cast<std::uintptr_t>(colorTexture.Get());
+                        colorTexture->GetDesc(&sample.colorDescription);
+                    }
+                }
             }
 
             {
@@ -403,6 +438,9 @@ namespace rpsui::render::SceneDepthCapture
                 g_capture.comparison = comparison;
                 g_capture.frameEpoch = epoch;
                 g_capture.logicalDepth = scene.logicalDepth;
+                g_capture.writeMask = stateDescription.DepthWriteMask;
+                g_capture.stencilEnabled = stateDescription.StencilEnable != FALSE;
+                g_capture.diagnostic = diagnostic;
             }
             g_capturedEpoch.store(
                 epoch,
@@ -588,6 +626,10 @@ namespace rpsui::render::SceneDepthCapture
         result.comparison = snapshot.comparison;
         result.frameEpoch = snapshot.frameEpoch;
         result.failureReason = nullptr;
+        result.sourceWriteMask = snapshot.writeMask;
+        result.sourceViewFlags = snapshot.viewDescription.Flags;
+        result.sourceStencilEnabled = snapshot.stencilEnabled;
+        result.diagnostic = snapshot.diagnostic;
         if (!g_reportedDepthMatch.exchange(true, std::memory_order_relaxed)) {
             log::info("RPS UI first depth match: epoch={} color=0x{:X} sceneDepthLogical={} depth=0x{:X} submitted={}x{} format={} samples={}/{} "
                 "depth={}x{} format={} samples={}/{} viewDimension={} depthFunc={}",
@@ -641,5 +683,6 @@ namespace rpsui::render::SceneDepthCapture
         g_capturedEpoch.store(0, std::memory_order_release);
         std::lock_guard lock(g_captureMutex);
         g_capture = {};
+        g_nextDiagnostic = {};
     }
 }

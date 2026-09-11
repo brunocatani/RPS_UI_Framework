@@ -190,16 +190,20 @@ namespace rpsui::render::StereoProjection
         }
     }
 
-    bool CaptureSnapshot(Snapshot& outSnapshot) noexcept
+    bool ReadSnapshot(Snapshot& outSnapshot, ReadFailure& failure) noexcept
     {
         outSnapshot = {};
+        failure = {};
         auto stage = CaptureStage::None;
         DWORD error = ERROR_SUCCESS;
+        const auto fail = [&](CaptureStage failedStage, DWORD failedError) {
+            failure = { failedStage, failedError };
+        };
 
         if (!REL::Module::IsVR() ||
             REL::Module::get().version() !=
                 F4SE::RUNTIME_VR_1_2_72) {
-            ReportFailure(stage, ERROR_NOT_SUPPORTED);
+            fail(stage, ERROR_NOT_SUPPORTED);
             return false;
         }
 
@@ -208,7 +212,7 @@ namespace rpsui::render::StereoProjection
                 REL::Offset(kRuntimeRootRva)
             };
             if (!PlausiblePointer(rootAddress.address())) {
-                ReportFailure(stage, ERROR_INVALID_ADDRESS);
+                fail(stage, ERROR_INVALID_ADDRESS);
                 return false;
             }
             stage = CaptureStage::RelocationResolved;
@@ -220,7 +224,7 @@ namespace rpsui::render::StereoProjection
                     sizeof(root),
                     error) ||
                 !PlausiblePointer(root)) {
-                ReportFailure(
+                fail(
                     stage,
                     error == ERROR_SUCCESS ?
                         ERROR_INVALID_ADDRESS :
@@ -235,12 +239,12 @@ namespace rpsui::render::StereoProjection
                     &fields,
                     sizeof(fields),
                     error)) {
-                ReportFailure(stage, error);
+                fail(stage, error);
                 return false;
             }
             stage = CaptureStage::RootStereoStateRead;
             if (!PlausiblePointer(fields.records)) {
-                ReportFailure(stage, ERROR_INVALID_ADDRESS);
+                fail(stage, ERROR_INVALID_ADDRESS);
                 return false;
             }
 
@@ -250,7 +254,7 @@ namespace rpsui::render::StereoProjection
                     records.data(),
                     records.size(),
                     error)) {
-                ReportFailure(stage, error);
+                fail(stage, error);
                 return false;
             }
             stage = CaptureStage::StereoRecordsRead;
@@ -280,16 +284,28 @@ namespace rpsui::render::StereoProjection
                 !ValidMatrix(outSnapshot.composite[0]) ||
                 !ValidMatrix(outSnapshot.composite[1])) {
                 outSnapshot = {};
-                ReportFailure(stage, ERROR_INVALID_DATA);
+                fail(stage, ERROR_INVALID_DATA);
                 return false;
             }
 
-            ReportSuccess();
+            outSnapshot.sourceRoot = root;
+            outSnapshot.sourceRecords = fields.records;
             return true;
         } catch (...) {
             outSnapshot = {};
-            ReportFailure(stage, ERROR_UNHANDLED_EXCEPTION);
+            fail(stage, ERROR_UNHANDLED_EXCEPTION);
             return false;
         }
+    }
+
+    bool CaptureSnapshot(Snapshot& outSnapshot) noexcept
+    {
+        ReadFailure failure;
+        if (!ReadSnapshot(outSnapshot, failure)) {
+            ReportFailure(failure.stage, failure.win32Error);
+            return false;
+        }
+        ReportSuccess();
+        return true;
     }
 }
