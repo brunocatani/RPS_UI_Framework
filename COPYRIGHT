@@ -1,0 +1,22 @@
+RPS UI Framework
+Copyright (C) 2026 Bruno Catani
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+RPS UI Framework is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+RPS UI Framework is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with RPS UI Framework. If not, see <https://www.gnu.org/licenses/>.
+
+This declaration applies to the original RPS UI Framework source, public
+SDK headers, and build files in this repository. Third-party components
+retain their respective licenses and notices; see THIRD_PARTY_NOTICES.txt.
+The complete GNU General Public License version 3 is provided in LICENSE.
