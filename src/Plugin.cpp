@@ -123,7 +123,11 @@ namespace
 
         runtime.setHookStatus(rpsui::sdk::HookStatusV1::Installed);
         runtime.setRendererReady(true);
-        runtime.start();
+        if (!runtime.start()) {
+            rpsui::log::critical(
+                "RPS UI Framework host unavailable: input initialization failed");
+            return;
+        }
         rpsui::log::info(
             "RPS UI Framework host is ready for UI consumers");
     }

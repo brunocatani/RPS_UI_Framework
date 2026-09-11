@@ -78,7 +78,7 @@ namespace rpsui
     public:
         static FrameworkRuntime& get() noexcept;
 
-        void start() noexcept;
+        bool start() noexcept;
         void handleInputFrame(const sdk::InputFrameV1& snapshot) noexcept;
         void setRendererReady(bool ready) noexcept;
         void setHookStatus(sdk::HookStatusV1 status) noexcept;

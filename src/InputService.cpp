@@ -50,7 +50,13 @@ bool copyMemory(const void* source,void* target,std::size_t bytes) noexcept {
 template<class T>bool read(std::uintptr_t source,T& target) noexcept {return copyMemory(reinterpret_cast<void*>(source),&target,sizeof(target));}
 bool prefix(std::uintptr_t rva,std::initializer_list<unsigned char> expected) {
  std::array<unsigned char,32> bytes{};
- return expected.size()<=bytes.size() && copyMemory(reinterpret_cast<void*>(REL::Offset(rva).address()),bytes.data(),expected.size()) && std::equal(expected.begin(),expected.end(),bytes.begin());
+ if(expected.size()>bytes.size() || !copyMemory(reinterpret_cast<void*>(REL::Offset(rva).address()),bytes.data(),expected.size())) {
+  log::error("UI input native guard unreadable at RVA {:#x} ({} bytes)",rva,expected.size());return false;
+ }
+ for(std::size_t i=0;i<expected.size();++i)if(bytes[i]!=expected.begin()[i]) {
+  log::error("UI input native guard mismatch at RVA {:#x}+{:#x}: expected {:02x}, actual {:02x}",rva,i,expected.begin()[i],bytes[i]);return false;
+ }
+ return true;
 }
 void filter(vr::TrackedDeviceIndex_t device,vr::VRControllerState_t* sample) noexcept {
  auto& s=state();int side=-1;
@@ -253,8 +259,8 @@ bool start() noexcept {
   // Caller 140D83DE0 and callee 140D3C820; wand slots and handedness in
   // 140EF90C0 / 140F02150 were checked against raw FO4VR disassembly.
   if(!prefix(0xd84063,{0x48,0x8b,0x0d,0xa6,0xe2,0xba,0x04}) || !prefix(0xd8405e,{0xe8}) ||
-     !prefix(0xef90c0,{0x53,0x48,0x83,0xec,0x60,0x48,0x83,0xb9,0xf0,0x06,0,0,0}) ||
-     !prefix(0xc86c30,{0x57,0x48,0x83,0xec,0x20,0x48,0x83,0x79,0x38,0})) {log::error("Independent UI input native boundary rejected");return false;}
+     !prefix(0xef90c0,{0x40,0x53,0x48,0x83,0xec,0x60,0x48,0x83,0xb9,0xf0,0x06,0,0,0}) ||
+     !prefix(0xc86c30,{0x40,0x57,0x48,0x83,0xec,0x20,0x48,0x83,0x79,0x38,0})) {log::error("Independent UI input native boundary rejected");return false;}
   std::int32_t relative{};
   if(!read(REL::Offset(0xd8405f).address(),relative))return false;
   const auto target=REL::Offset(0xd84063).address()+relative;MEMORY_BASIC_INFORMATION memory{};

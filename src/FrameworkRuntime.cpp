@@ -141,13 +141,17 @@ namespace rpsui
         return *runtime;
     }
 
-    void FrameworkRuntime::start() noexcept
+    bool FrameworkRuntime::start() noexcept
     {
         if (started_.exchange(true, std::memory_order_acq_rel)) {
-            return;
+            return input::installed();
         }
-        if (!input::start()) log::error("UI input service could not start");
+        if (!input::start()) {
+            log::error("UI input service could not start");
+            return false;
+        }
         log::info("RPS UI Framework runtime started");
+        return true;
     }
 
     void FrameworkRuntime::setRendererReady(bool ready) noexcept
