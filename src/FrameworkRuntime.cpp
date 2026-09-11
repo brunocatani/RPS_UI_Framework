@@ -939,6 +939,29 @@ namespace rpsui
                 samples[index].leaseAccepted && samples[index].configNavigation);
         }
 
+        // Bounded samples distinguish pose/ray failures from capture failures
+        // during independent-input runtime qualification.
+        const auto tracePanel = std::find_if(panels_.begin(), panels_.end(), [](const auto& panel) { return panel.open; });
+        const auto traceHandle = tracePanel == panels_.end() ? 0 : tracePanel->panelHandle;
+        if (traceHandle != pointerTracePanel_) {
+            pointerTracePanel_ = traceHandle;
+            pointerTraceSamples_ = 0;
+            pointerTraceNextTime_ = 0;
+        }
+        if (traceHandle && pointerTraceSamples_ < 6 && snapshot.seconds >= pointerTraceNextTime_) {
+            ++pointerTraceSamples_;
+            pointerTraceNextTime_ = snapshot.seconds + 1;
+            for (unsigned side = 0; side < samples.size(); ++side) {
+                const auto& sample = samples[side];
+                pointer_panel_intersection::Hit hit{};
+                const bool planeHit = sample.rayValid && pointer_panel_intersection::intersect(sample.ray, intersectionPanel(tracePanel->pose), hit);
+                log::info("UI pointer sample: frame={} hand={} valid={} origin=({:.2f},{:.2f},{:.2f}) direction=({:.3f},{:.3f},{:.3f}) panel={} planeHit={} uv=({:.3f},{:.3f}) hitPanel={} capture={} rawDown={} click={}",
+                    snapshot.sequence, side, sample.rayValid, sample.ray.origin.x, sample.ray.origin.y, sample.ray.origin.z,
+                    sample.ray.direction.x, sample.ray.direction.y, sample.ray.direction.z, traceHandle, planeHit, hit.u, hit.v,
+                    sample.hitPanel, sample.leaseAccepted, sample.rawPrimaryDown, sample.submittedPrimaryDown);
+            }
+        }
+
         if (activeResize_.active) {
             const std::size_t index =
                 handIndex(rockHand(activeResize_.hand));

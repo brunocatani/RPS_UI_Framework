@@ -1,6 +1,7 @@
 #include "PCH.h"
 #include "InputService.h"
 #include "InputCapturePolicy.h"
+#include "NativeWandPose.h"
 #include "FrameworkRuntime.h"
 #include "PanelCooperation.h"
 #include "Logger.h"
@@ -103,13 +104,7 @@ unsigned nativeHand(std::uintptr_t player,std::uintptr_t offset,sdk::HandInputV1
  std::uintptr_t node{};RE::NiTransform transform{};
  if(!read(player+offset,node) || node<0x10000 || node>0x00007fffffffffff || node%alignof(void*))return 1;
  if(!read(node+offsetof(RE::NiAVObject,world),transform))return 2;
- if(!std::isfinite(transform.scale) || transform.scale<=0 || transform.scale>100)return 3;
- for(unsigned axis=0;axis<3;++axis){hand.position[axis]=transform.translate[axis];hand.forward[axis]=transform.rotate.entry[axis][1];
-  if(!std::isfinite(hand.position[axis]) || std::fabs(hand.position[axis])>1.e8f || !std::isfinite(hand.forward[axis]))return 3;}
- const float length=std::hypot(hand.forward[0],hand.forward[1],hand.forward[2]);
- if(length<.01f || length>100)return 3;
- for(float& component:hand.forward)component/=length;
- return 0;
+ return input_policy::nativeWandPose(transform,hand)?0:3;
 }
 void publishMask(unsigned slot,const sdk::InputCaptureV1& capture) {
  auto& s=state();for(unsigned hand=0;hand<2;++hand){s.masks[slot].buttons[hand]=capture.buttons[hand];s.masks[slot].chord[hand]=capture.chord[hand];}
@@ -176,13 +171,14 @@ void update(const RockProviderFrameSnapshot* provider=nullptr) {
  auto& s=state();++s.frame.sequence;s.frame.seconds=std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
  s.frame.ready=false;s.frame.hands[0]={};s.frame.hands[1]={};
  if(provider)s.rock=*provider;
- const bool useRock=s.rockOwner && provider && provider->providerReady;
- s.useRock=useRock;
+ const auto source=input_policy::selectSource(s.rockOwner!=0,provider && provider->providerReady);
+ s.useRock=s.rockOwner!=0;
  unsigned stage=0;
  if(!s.session.load())stage=1;
  else if(blockedMenu())stage=2;
  else if(!s.captureHealthy.load())stage=6;
- else if(useRock) {
+ else if(source==input_policy::Source::Unavailable)stage=7;
+ else if(source==input_policy::Source::Rock) {
   s.frame.ready=!s.rock.menuBlocking && !s.rock.configBlocking;
   s.frame.leftHanded=s.rock.primaryHand==RockProviderHand::Left;
   for(unsigned side=0;side<2;++side) {
@@ -212,7 +208,7 @@ void update(const RockProviderFrameSnapshot* provider=nullptr) {
    if(!s.frame.ready)stage=5;
   }
  }
- if(stage!=s.failureStage){s.failureStage=stage;log::info("UI input availability stage={} (0=ready, 1=session, 2=menu, 3=OpenVR, 4=player, 5=wand, 6=capture)",stage);}
+ if(stage!=s.failureStage){s.failureStage=stage;log::info("UI input availability stage={} (0=ready, 1=session, 2=menu, 3=OpenVR, 4=player, 5=wand, 6=capture, 7=ROCK unavailable)",stage);}
  s.allowPollCapture=s.frame.ready;
  FrameworkRuntime::get().handleInputFrame(s.frame);
  std::array<Client,maxClients> callbacks;
@@ -225,9 +221,9 @@ void safeUpdate(const RockProviderFrameSnapshot* provider=nullptr) noexcept {
  try{update(provider);}catch(...){auto& s=state();s.allowPollCapture=false;s.frame.ready=false;for(unsigned i=0;i<=maxClients;++i)publishMask(i,{});static bool logged=false;if(!logged){logged=true;log::error("UI input frame failed; capture released");}}
 }
 void ROCK_PROVIDER_CALL providerFrame(const RockProviderFrameSnapshot* snapshot,void*) noexcept {
- // Preserve the provider's authoritative post-update hand poses. Not-ready
- // notifications leave the native loop in charge of standalone UI input.
- if(snapshot && snapshot->providerReady && state().installed.load())safeUpdate(snapshot);
+ // A loaded ROCK owns controller input even while its provider is unavailable.
+ // Lifecycle notifications clear UI interaction instead of enabling native input.
+ if(snapshot && state().installed.load())safeUpdate(snapshot);
 }
 void tick(std::uint64_t argument) {
  originalTick(argument);
@@ -267,6 +263,8 @@ bool start() noexcept {
   if(!VirtualQuery(reinterpret_cast<void*>(target),&memory,sizeof(memory)) || memory.State!=MEM_COMMIT ||
      (memory.Protect&(PAGE_GUARD|PAGE_NOACCESS)) || !(memory.Protect&(PAGE_EXECUTE|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY)))return false;
   if(!connectRock()){log::error("Loaded ROCK could not register UI input; refusing conflicting input hooks");return false;}
+  s.useRock=s.rockOwner!=0;
+  log::info("UI controller input source: {}",s.rockOwner?"ROCK (native polling disabled)":"native wands / OpenVR");
   {std::scoped_lock lock(s.mutex);for(auto& client:s.clients)if(client.token && s.rockOwner)client.rockOwner=registerRockInputOwner();}
   originalTick=reinterpret_cast<GameTick>(F4SE::GetTrampoline().write_call<5>(REL::Offset(0xd8405e).address(),&tick));
   s.installed=originalTick!=nullptr;log::info("Independent UI input installed; optional ROCK owner={}",s.rockOwner);return s.installed;

@@ -2,6 +2,10 @@
 #include <cstdint>
 
 namespace rpsui::input_policy {
+enum class Source { Native, Rock, Unavailable };
+inline constexpr Source selectSource(bool rockRegistered,bool rockReady) {
+ return !rockRegistered?Source::Native:rockReady?Source::Rock:Source::Unavailable;
+}
 inline constexpr bool chordHeld(std::uint64_t left,std::uint64_t right,std::uint64_t leftChord,std::uint64_t rightChord) {
  return (leftChord || rightChord) && (left&leftChord)==leftChord && (right&rightChord)==rightChord;
 }

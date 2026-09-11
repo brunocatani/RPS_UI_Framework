@@ -1,5 +1,6 @@
 #include "ContextualScrollPolicy.h"
 #include "InputCapturePolicy.h"
+#include "NativeWandPose.h"
 #include "PanelResizePolicy.h"
 #include "PointerClickGate.h"
 #include "PointerHandSelection.h"
@@ -8,6 +9,7 @@
 #include "render/EngineStereoSubmissionPolicy.h"
 
 #include <chrono>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
@@ -21,6 +23,43 @@ namespace
         if (!condition) {
             throw std::runtime_error(message);
         }
+    }
+
+    void testNativeWandPointer()
+    {
+        using namespace rpsui::pointer_panel_intersection;
+        struct Transform {
+            std::array<std::array<float, 4>, 3> rotate{};
+            std::array<float, 3> translate{ -79000, 90000, 7950 };
+            float scale{ 1 };
+        } transform;
+        for (float yaw : { -2.1f, 0.0f, 1.2f }) {
+            for (float pitch : { -0.4f, 0.0f, 0.5f }) {
+                const float sy = std::sin(yaw), cy = std::cos(yaw);
+                const float sp = std::sin(pitch), cp = std::cos(pitch);
+                transform.rotate = {{{cy, -sy, 0, 0}, {sy * cp, cy * cp, sp, 0}, {-sy * sp, -cy * sp, cp, 0}}};
+                rpsui::sdk::HandInputV1 hand;
+                require(rpsui::input_policy::nativeWandPose(transform, hand), "valid native wand pose rejected");
+                const Vector origin{hand.position[0], hand.position[1], hand.position[2]};
+                const Vector direction{hand.forward[0], hand.forward[1], hand.forward[2]};
+                const Vector forward{sy * cp, cy * cp, sp};
+                const Panel panel{
+                    .center = addScaled(origin, forward, 100),
+                    .right = {cy, -sy, 0}, .up = {-sy * sp, -cy * sp, cp},
+                    .front = {-forward.x, -forward.y, -forward.z}, .width = 95, .height = 95,
+                };
+                Hit hit;
+                require(intersect({origin, direction, 200}, panel, hit) && hit.inside &&
+                    std::fabs(hit.u - .5f) < .001f && std::fabs(hit.v - .5f) < .001f,
+                    "native pointer missed aimed-at panel after controller yaw/pitch");
+            }
+        }
+        rpsui::sdk::HandInputV1 hand;
+        transform.scale = 0;
+        require(!rpsui::input_policy::nativeWandPose(transform, hand), "zero-scale wand accepted");
+        transform.scale = 1;
+        transform.rotate[1] = {};
+        require(!rpsui::input_policy::nativeWandPose(transform, hand), "degenerate wand direction accepted");
     }
 
     void testApiContract()
@@ -191,6 +230,9 @@ int main()
 {
     try {
         using namespace rpsui::input_policy;
+        require(selectSource(false, false) == Source::Native, "standalone input unavailable without ROCK");
+        require(selectSource(true, true) == Source::Rock, "ready ROCK did not own controller input");
+        require(selectSource(true, false) == Source::Unavailable, "unavailable ROCK activated competing native input");
         constexpr auto trigger=1ull<<33, grip=1ull<<2, face=1ull<<7;
         require(chordHeld(grip,trigger,grip,trigger),"cross-hand chord did not capture both members");
         require(!chordHeld(grip,0,grip,trigger),"partial cross-hand chord captured input");
@@ -200,6 +242,7 @@ int main()
         require(axesForButtons(trigger|grip)==6,"captured trigger/grip left analog input exposed");
         require(axesForButtons(face)==0,"face-button capture changed an unrelated analog axis");
         require(axesForButtons(1ull<<32)==1,"thumbstick capture missed its analog axis");
+        testNativeWandPointer();
         testApiContract();
         testPointerSelection();
         testClickGate();

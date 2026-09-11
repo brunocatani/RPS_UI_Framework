@@ -257,6 +257,9 @@ namespace rpsui
         std::array<contextual_scroll::State, 2> scrollState_{};
         pointer_hand_selection::State pointerSelection_{};
         std::uint64_t pointerPanelHandle_{ 0 };
+        std::uint64_t pointerTracePanel_{ 0 };
+        unsigned pointerTraceSamples_{ 0 };
+        double pointerTraceNextTime_{ 0 };
         ActiveResize activeResize_{};
         std::uint8_t suppressedHands_{ 0 };
     };
