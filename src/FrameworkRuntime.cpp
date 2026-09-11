@@ -202,6 +202,11 @@ namespace rpsui
         rendererReady_.store(ready, std::memory_order_release);
     }
 
+    void FrameworkRuntime::setHookStatus(sdk::HookStatusV1 status) noexcept
+    {
+        hookStatus_.store(status, std::memory_order_release);
+    }
+
     bool FrameworkRuntime::isReady() const noexcept
     {
         std::scoped_lock lock(mutex_);
@@ -235,6 +240,7 @@ namespace rpsui
                 .panelHandle = panel.panelHandle,
                 .renderCallback = panel.renderCallback,
                 .userData = panel.userData,
+                .callbackGate = panel.callbackGate,
                 .pixelWidth = panel.pixelWidth,
                 .pixelHeight = panel.pixelHeight,
                 .sortOrder = panel.sortOrder,
@@ -366,6 +372,12 @@ namespace rpsui
 
     rpsui::sdk::ResultV1 FrameworkRuntime::unregisterConsumer(
         std::uint64_t ownerToken) noexcept
+    { return unregisterConsumerImpl(ownerToken, false); }
+
+    sdk::ResultV1 FrameworkRuntime::unregisterConsumerSafely(std::uint64_t ownerToken) noexcept
+    { return unregisterConsumerImpl(ownerToken, true); }
+
+    sdk::ResultV1 FrameworkRuntime::unregisterConsumerImpl(std::uint64_t ownerToken, bool drain) noexcept
     {
         try {
             std::scoped_lock lock(mutex_);
@@ -379,6 +391,28 @@ namespace rpsui
                 return rpsui::sdk::ResultV1::OwnerNotRegistered;
             }
 
+            // Cooperative panels cannot bypass safe retirement through V1.
+            drain = drain || consumer->closing || std::any_of(panels_.begin(), panels_.end(),
+                [ownerToken](const PanelRecord& panel) {
+                    return panel.ownerToken == ownerToken && (panel.cooperative || panel.closing);
+                });
+            consumer->closing = true;
+            bool drained = true;
+            bool ownedInteraction = false;
+            for (auto& panel : panels_) {
+                if (panel.ownerToken != ownerToken) continue;
+                ownedInteraction = ownedInteraction || pointerPanelHandle_ == panel.panelHandle ||
+                    activeResize_.panelHandle == panel.panelHandle;
+                panel.open = false;
+                panel.closing = true;
+                panel.input = {};
+                ++panel.stateSequence;
+                drained = panel.callbackGate->close() && drained;
+            }
+            if (ownedInteraction) clearPointerStateLocked();
+            updateDepthRequestLocked();
+            if (drain && !drained) return sdk::ResultV1::CallbackBusy;
+
             panels_.erase(
                 std::remove_if(
                     panels_.begin(),
@@ -388,8 +422,6 @@ namespace rpsui
                     }),
                 panels_.end());
             consumers_.erase(consumer);
-            clearPointerStateLocked();
-            updateDepthRequestLocked();
             return rpsui::sdk::ResultV1::Ok;
         } catch (...) {
             return rpsui::sdk::ResultV1::InternalError;
@@ -400,6 +432,11 @@ namespace rpsui
         std::uint64_t ownerToken,
         const rpsui::sdk::PanelRegistrationV1& registration,
         std::uint64_t& outPanelHandle) noexcept
+    { return registerPanelImpl(ownerToken, registration, outPanelHandle, false); }
+
+    sdk::ResultV1 FrameworkRuntime::registerPanelImpl(std::uint64_t ownerToken,
+        const sdk::PanelRegistrationV1& registration, std::uint64_t& outPanelHandle, bool cooperative,
+        sdk::PanelAgreementV1* agreement) noexcept
     {
         try {
             outPanelHandle = 0;
@@ -442,15 +479,27 @@ namespace rpsui
             if (!hasConsumerLocked(ownerToken)) {
                 return rpsui::sdk::ResultV1::OwnerNotRegistered;
             }
+            if (std::any_of(consumers_.begin(), consumers_.end(), [ownerToken](const ConsumerRecord& consumer) {
+                return consumer.ownerToken == ownerToken && consumer.closing;
+            })) return sdk::ResultV1::PanelClosing;
             if (panels_.size() >= rpsui::sdk::RPSUI_MAX_PANELS) {
                 return rpsui::sdk::ResultV1::CapacityReached;
             }
-            if (std::any_of(
+            const auto existing = std::find_if(
                     panels_.begin(),
                     panels_.end(),
                     [&](const PanelRecord& panel) {
                         return panel.panelId == panelId;
-                    })) {
+                    });
+            if (existing != panels_.end()) {
+                if (agreement) {
+                    agreement->conflictingAccess = sdk::RPSUI_PANEL_ACCESS;
+                    const auto owner = std::find_if(consumers_.begin(), consumers_.end(),
+                        [&](const ConsumerRecord& consumer) { return consumer.ownerToken == existing->ownerToken; });
+                    if (owner != consumers_.end())
+                        std::memcpy(agreement->conflictOwnerId, owner->consumerId.c_str(), owner->consumerId.size() + 1);
+                    return sdk::ResultV1::ResourceConflict;
+                }
                 return rpsui::sdk::ResultV1::InvalidArgument;
             }
 
@@ -472,7 +521,9 @@ namespace rpsui
                 .flags = registration.flags,
                 .renderCallback = registration.renderCallback,
                 .userData = registration.userData,
+                .callbackGate = std::make_shared<PanelCallbackGate>(),
             };
+            panel.cooperative = cooperative;
             panel.pose.physicalWidth = registration.defaultPhysicalWidth;
             panel.pose.physicalHeight =
                 registration.defaultPhysicalWidth / aspect;
@@ -489,9 +540,68 @@ namespace rpsui
         }
     }
 
+    sdk::ResultV1 FrameworkRuntime::registerCooperativePanel(std::uint64_t ownerToken,
+        const sdk::CooperativePanelRegistrationV1& registration, sdk::PanelAgreementV1& agreement) noexcept
+    {
+        const auto valid = validatePanelContract(registration, agreement);
+        if (valid != sdk::ResultV1::Ok) return valid;
+        const auto result = registerPanelImpl(ownerToken, registration.panel, agreement.panelHandle, true, &agreement);
+        if (result == sdk::ResultV1::Ok) agreement.grantedAccess = sdk::RPSUI_PANEL_ACCESS;
+        return result;
+    }
+
+    sdk::ResultV1 FrameworkRuntime::getCooperationSnapshot(sdk::CooperationSnapshotV1& out) const noexcept
+    {
+        try {
+            out = {};
+            std::lock_guard lock(mutex_);
+            out.hookStatus = hookStatus_.load(std::memory_order_acquire);
+            out.frameworkReady = rendererReady_.load(std::memory_order_acquire) && providerCallbackToken_ != 0;
+            out.suppressedHands = suppressedHands_;
+            out.focusedPanelHandle = pointerPanelHandle_;
+            out.resizingPanelHandle = activeResize_.active ? activeResize_.panelHandle : 0;
+            for (const auto& consumer : consumers_) {
+                if (out.consumerCount >= sdk::RPSUI_MAX_CONSUMERS) break;
+                auto& entry = out.consumers[out.consumerCount++];
+                entry.ownerToken = consumer.ownerToken;
+                entry.grantedFeatures = consumer.grantedFeatures;
+                std::memcpy(entry.consumerId, consumer.consumerId.c_str(), consumer.consumerId.size() + 1);
+                std::memcpy(entry.displayName, consumer.displayName.c_str(), consumer.displayName.size() + 1);
+            }
+            for (const auto& panel : panels_) {
+                if (out.panelCount >= sdk::RPSUI_MAX_PANELS) break;
+                auto& entry = out.panels[out.panelCount++];
+                entry.ownerToken = panel.ownerToken;
+                entry.panelHandle = panel.panelHandle;
+                entry.stateSequence = panel.stateSequence;
+                std::memcpy(entry.panelId, panel.panelId.c_str(), panel.panelId.size() + 1);
+                std::memcpy(entry.displayName, panel.displayName.c_str(), panel.displayName.size() + 1);
+                entry.pose = panel.pose;
+                entry.sortOrder = panel.sortOrder;
+                entry.flags = panel.flags;
+                entry.open = panel.open;
+                entry.closing = panel.closing;
+                entry.cooperative = panel.cooperative;
+            }
+            std::sort(out.panels, out.panels + out.panelCount, [](const auto& left, const auto& right) {
+                return left.sortOrder != right.sortOrder ? left.sortOrder < right.sortOrder : left.panelHandle < right.panelHandle;
+            });
+            return sdk::ResultV1::Ok;
+        } catch (...) {
+            out = {};
+            return sdk::ResultV1::InternalError;
+        }
+    }
+
     rpsui::sdk::ResultV1 FrameworkRuntime::unregisterPanel(
         std::uint64_t ownerToken,
         std::uint64_t panelHandle) noexcept
+    { return unregisterPanelImpl(ownerToken, panelHandle, false); }
+
+    sdk::ResultV1 FrameworkRuntime::unregisterPanelSafely(std::uint64_t ownerToken, std::uint64_t panelHandle) noexcept
+    { return unregisterPanelImpl(ownerToken, panelHandle, true); }
+
+    sdk::ResultV1 FrameworkRuntime::unregisterPanelImpl(std::uint64_t ownerToken, std::uint64_t panelHandle, bool drain) noexcept
     {
         try {
             std::scoped_lock lock(mutex_);
@@ -510,11 +620,18 @@ namespace rpsui
             const bool ownedInteraction =
                 pointerPanelHandle_ == panelHandle ||
                 activeResize_.panelHandle == panelHandle;
-            panels_.erase(panel);
+            drain = drain || panel->cooperative || panel->closing;
+            panel->closing = true;
+            panel->open = false;
+            panel->input = {};
+            ++panel->stateSequence;
+            const bool drained = panel->callbackGate->close();
             if (ownedInteraction) {
                 clearPointerStateLocked();
             }
             updateDepthRequestLocked();
+            if (drain && !drained) return sdk::ResultV1::CallbackBusy;
+            panels_.erase(panel);
             return rpsui::sdk::ResultV1::Ok;
         } catch (...) {
             return rpsui::sdk::ResultV1::InternalError;
@@ -628,6 +745,7 @@ namespace rpsui
                 presentation.sequence <= panel->submittedSequence) {
                 return rpsui::sdk::ResultV1::InvalidArgument;
             }
+            if (panel->closing) return sdk::ResultV1::PanelClosing;
             if (presentation.open != 0 &&
                 !validatePose(presentation.pose, *panel)) {
                 return rpsui::sdk::ResultV1::InvalidPose;
@@ -672,6 +790,7 @@ namespace rpsui
             if (panel->ownerToken != ownerToken) {
                 return rpsui::sdk::ResultV1::OwnershipMismatch;
             }
+            if (panel->closing) return sdk::ResultV1::PanelClosing;
             const float aspect =
                 static_cast<float>(panel->pixelWidth) /
                 static_cast<float>(panel->pixelHeight);

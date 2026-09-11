@@ -3,6 +3,7 @@
 #include "FrameworkRuntime.h"
 #include "Logger.h"
 #include "RPSUIFrameworkApi.h"
+#include "RPSUICooperationApi.h"
 
 namespace
 {
@@ -110,6 +111,32 @@ namespace
         .resetPanelSize = &resetPanelSize,
         .getPanelState = &getPanelState,
     };
+
+    ResultV1 RPSUI_CALL registerCooperativePanel(std::uint64_t owner,
+        const CooperativePanelRegistrationV1* registration, PanelAgreementV1* agreement) noexcept
+    {
+        if (!agreement || agreement->structSize < sizeof(PanelAgreementV1)) return ResultV1::InvalidArgument;
+        if (agreement->apiVersion != RPSUI_COOPERATION_VERSION) return ResultV1::VersionMismatch;
+        if (!registration) { *agreement = {}; return ResultV1::InvalidArgument; }
+        return rpsui::FrameworkRuntime::get().registerCooperativePanel(owner, *registration, *agreement);
+    }
+    ResultV1 RPSUI_CALL getCooperationSnapshot(CooperationSnapshotV1* snapshot) noexcept
+    {
+        if (!snapshot || snapshot->structSize < sizeof(CooperationSnapshotV1)) return ResultV1::InvalidArgument;
+        if (snapshot->apiVersion != RPSUI_COOPERATION_VERSION) return ResultV1::VersionMismatch;
+        return rpsui::FrameworkRuntime::get().getCooperationSnapshot(*snapshot);
+    }
+    ResultV1 RPSUI_CALL unregisterPanelSafely(std::uint64_t owner, std::uint64_t panel) noexcept
+    { return rpsui::FrameworkRuntime::get().unregisterPanelSafely(owner, panel); }
+    ResultV1 RPSUI_CALL unregisterConsumerSafely(std::uint64_t owner) noexcept
+    { return rpsui::FrameworkRuntime::get().unregisterConsumerSafely(owner); }
+
+    const CooperationApiV1 g_cooperation{
+        .registerPanel = &registerCooperativePanel,
+        .getSnapshot = &getCooperationSnapshot,
+        .unregisterPanelSafely = &unregisterPanelSafely,
+        .unregisterConsumerSafely = &unregisterConsumerSafely,
+    };
 }
 
 extern "C" DLLEXPORT const rpsui::sdk::ApiV1* RPSUI_CALL
@@ -118,4 +145,10 @@ RPSUI_RequestApi(std::uint32_t requestedVersion) noexcept
     return requestedVersion == rpsui::sdk::RPSUI_API_VERSION ?
         std::addressof(g_api) :
         nullptr;
+}
+
+extern "C" DLLEXPORT const rpsui::sdk::CooperationApiV1* RPSUI_CALL
+RPSUI_RequestCooperationApi(std::uint32_t requestedVersion) noexcept
+{
+    return requestedVersion == rpsui::sdk::RPSUI_COOPERATION_VERSION ? &g_cooperation : nullptr;
 }

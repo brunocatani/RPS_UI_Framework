@@ -98,19 +98,24 @@ namespace
 
         reportRuntimeModules();
 
+        auto& runtime = rpsui::FrameworkRuntime::get();
         if (!rpsui::render::SceneDepthCapture::Install()) {
+            runtime.setHookStatus(rpsui::sdk::HookStatusV1::Unavailable);
             rpsui::log::critical(
                 "RPS UI Framework requires guarded same-frame scene depth");
             return;
         }
-        if (!rpsui::render::RenderHooks::Install()) {
+        const auto hooks = rpsui::render::RenderHooks::Install();
+        if (hooks != rpsui::render::RenderHooks::InstallResult::Installed) {
+            runtime.setHookStatus(hooks == rpsui::render::RenderHooks::InstallResult::Conflict ?
+                rpsui::sdk::HookStatusV1::Conflict : rpsui::sdk::HookStatusV1::Unavailable);
             rpsui::log::critical(
-                "RPS UI Framework could not claim the exclusive FO4VR stereo "
-                "callsites; disable PrismaUI and standalone native renderers");
+                "RPS UI Framework stereo submission unavailable; cooperating UI mods must use "
+                "the panel callback API instead of replacing the same submission callsites");
             return;
         }
 
-        auto& runtime = rpsui::FrameworkRuntime::get();
+        runtime.setHookStatus(rpsui::sdk::HookStatusV1::Installed);
         runtime.setRendererReady(true);
         runtime.start();
         rpsui::log::info(

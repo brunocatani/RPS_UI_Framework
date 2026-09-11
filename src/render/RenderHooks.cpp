@@ -114,15 +114,15 @@ namespace rpsui::render::RenderHooks
         }
     }
 
-    bool Install() noexcept
+    InstallResult Install() noexcept
     {
         std::scoped_lock lock(g_installMutex);
         if (g_installed.load(std::memory_order_acquire)) {
-            return true;
+            return InstallResult::Installed;
         }
         if (!IsExactRuntime()) {
             log::critical("RPS UI Framework stereo composition supports only Fallout 4 VR 1.2.72");
-            return false;
+            return InstallResult::Unavailable;
         }
 
         using namespace EngineStereoSubmissionPolicy;
@@ -150,7 +150,7 @@ namespace rpsui::render::RenderHooks
                 log::critical(
                     "RPS UI Framework stereo guards do not match the pristine FO4VR 1.2.72 callsites; "
                     "another renderer may already own them");
-                return false;
+                return InstallResult::Conflict;
             }
 
             g_originalSubmit = reinterpret_cast<SubmitStereoTexture>(submitAddress);
@@ -161,7 +161,7 @@ namespace rpsui::render::RenderHooks
                 RestoreCall(fullCallsite, kFullSubmitOriginalCall);
                 fullPatched = false;
                 g_originalSubmit = nullptr;
-                return false;
+                return InstallResult::Unavailable;
             }
 
             const auto specialOriginal = trampoline.write_call<5>(specialCallsite, HookSubmitStereoTexture);
@@ -172,12 +172,12 @@ namespace rpsui::render::RenderHooks
                 RestoreCall(fullCallsite, kFullSubmitOriginalCall);
                 fullPatched = false;
                 g_originalSubmit = nullptr;
-                return false;
+                return InstallResult::Unavailable;
             }
 
             g_installed.store(true, std::memory_order_release);
             log::info("RPS UI Framework installed exclusive guarded FO4VR stereo composition");
-            return true;
+            return InstallResult::Installed;
         } catch (...) {
             if (specialPatched) {
                 RestoreCall(specialCallsite, kSpecialSubmitOriginalCall);
@@ -187,7 +187,7 @@ namespace rpsui::render::RenderHooks
             }
             g_originalSubmit = nullptr;
             log::critical("RPS UI Framework stereo-hook installation failed");
-            return false;
+            return InstallResult::Unavailable;
         }
     }
 

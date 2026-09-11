@@ -35,6 +35,10 @@ namespace rpsui::sdk
         InvalidPose = 8,
         CallbackFailed = 9,
         InternalError = 10,
+        ResourceConflict = 11,
+        UnsupportedStage = 12,
+        CallbackBusy = 13,
+        PanelClosing = 14,
     };
 
     enum class FeatureV1 : std::uint64_t

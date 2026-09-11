@@ -600,6 +600,8 @@ namespace rpsui::render
             PanelGpu& gpu,
             float deltaSeconds) noexcept
         {
+            // Each independent consumer backend gets its own state boundary.
+            ScopedD3D11State consumerState(state.context.Get());
             auto* renderTarget = gpu.renderTarget.Get();
             state.context->OMSetRenderTargets(
                 1,
@@ -718,6 +720,8 @@ namespace rpsui::render
 
         ScopedPresentationState presentationState(state);
         for (const auto& panel : panels) {
+            PanelCallbackScope callbackScope(panel.callbackGate);
+            if (!callbackScope) continue;
             auto* gpu = ensurePanelGpu(state, panel);
             if (!gpu) {
                 if (traceSample) reportPanelProjection(panel, projection, depth.frameEpoch, false);

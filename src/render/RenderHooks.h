@@ -2,6 +2,7 @@
 
 namespace rpsui::render::RenderHooks
 {
-    [[nodiscard]] bool Install() noexcept;
+    enum class InstallResult { Installed, Conflict, Unavailable };
+    [[nodiscard]] InstallResult Install() noexcept;
     [[nodiscard]] bool IsInstalled() noexcept;
 }

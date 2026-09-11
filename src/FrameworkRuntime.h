@@ -5,6 +5,7 @@
 #include "PointerClickGate.h"
 #include "PointerHandSelection.h"
 #include "PointerPanelIntersection.h"
+#include "PanelCooperation.h"
 
 #include "RPSUIFrameworkApi.h"
 #include "ROCKProviderApi.h"
@@ -25,6 +26,7 @@ namespace rpsui
         std::uint64_t panelHandle{ 0 };
         rpsui::sdk::PanelRenderCallbackV1 renderCallback{ nullptr };
         void* userData{ nullptr };
+        std::shared_ptr<PanelCallbackGate> callbackGate;
         std::uint32_t pixelWidth{ 0 };
         std::uint32_t pixelHeight{ 0 };
         std::int32_t sortOrder{ 0 };
@@ -77,6 +79,7 @@ namespace rpsui
 
         void start() noexcept;
         void setRendererReady(bool ready) noexcept;
+        void setHookStatus(sdk::HookStatusV1 status) noexcept;
         [[nodiscard]] bool isReady() const noexcept;
         [[nodiscard]] bool hasOpenPanels() const noexcept;
         [[nodiscard]] RenderPanelBatch snapshotRenderPanels() const noexcept;
@@ -105,6 +108,12 @@ namespace rpsui
             std::uint64_t panelHandle,
             rpsui::sdk::PanelStateV1& outState) const noexcept;
 
+        sdk::ResultV1 registerCooperativePanel(std::uint64_t ownerToken,
+            const sdk::CooperativePanelRegistrationV1&, sdk::PanelAgreementV1&) noexcept;
+        sdk::ResultV1 getCooperationSnapshot(sdk::CooperationSnapshotV1&) const noexcept;
+        sdk::ResultV1 unregisterPanelSafely(std::uint64_t ownerToken, std::uint64_t panelHandle) noexcept;
+        sdk::ResultV1 unregisterConsumerSafely(std::uint64_t ownerToken) noexcept;
+
         FrameworkRuntime(const FrameworkRuntime&) = delete;
         FrameworkRuntime& operator=(const FrameworkRuntime&) = delete;
 
@@ -115,6 +124,7 @@ namespace rpsui
             std::string consumerId;
             std::string displayName;
             std::uint64_t grantedFeatures{ 0 };
+            bool closing{ false };
         };
 
         struct PanelInput
@@ -152,11 +162,14 @@ namespace rpsui
             std::uint32_t flags{ 0 };
             rpsui::sdk::PanelRenderCallbackV1 renderCallback{ nullptr };
             void* userData{ nullptr };
+            std::shared_ptr<PanelCallbackGate> callbackGate;
             rpsui::sdk::PanelPoseV1 pose{};
             PanelInput input{};
             std::uint64_t submittedSequence{ 0 };
             std::uint64_t stateSequence{ 1 };
             bool open{ false };
+            bool closing{ false };
+            bool cooperative{ false };
         };
 
         struct HandSample
@@ -199,6 +212,12 @@ namespace rpsui
         FrameworkRuntime() = default;
         ~FrameworkRuntime() = default;
 
+        sdk::ResultV1 registerPanelImpl(std::uint64_t ownerToken,
+            const sdk::PanelRegistrationV1&, std::uint64_t& outPanelHandle, bool cooperative,
+            sdk::PanelAgreementV1* agreement = nullptr) noexcept;
+        sdk::ResultV1 unregisterPanelImpl(std::uint64_t ownerToken, std::uint64_t panelHandle, bool drain) noexcept;
+        sdk::ResultV1 unregisterConsumerImpl(std::uint64_t ownerToken, bool drain) noexcept;
+
         static void ROCK_PROVIDER_CALL onRockFrame(
             const rock::provider::RockProviderFrameSnapshot* snapshot,
             void* userData) noexcept;
@@ -239,6 +258,7 @@ namespace rpsui
         std::uint64_t nextPanelHandle_{ 1 };
         std::atomic_bool started_{ false };
         std::atomic_bool rendererReady_{ false };
+        std::atomic<sdk::HookStatusV1> hookStatus_{ sdk::HookStatusV1::NotInstalled };
 
         std::uint64_t providerOwnerToken_{ 0 };
         std::uint64_t providerCallbackToken_{ 0 };
