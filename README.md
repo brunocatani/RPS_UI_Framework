@@ -7,8 +7,10 @@ a mod lists it as a requirement; individual mods supply their menus.
 
 ## For developers
 
-The public UI API and integration guides are available in the
+The public UI API is available in the
 [RPS SDK](https://github.com/brunocatani/RPS_SDK/tree/main/SDK/UI).
+Read the [DevArtificial documentation](https://devartificial.pro/docs/rps-sdk/ui)
+for setup, API reference, and integration guides.
 
 ## Credits
 
