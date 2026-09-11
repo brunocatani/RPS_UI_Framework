@@ -9,7 +9,6 @@
 
 #include "RPSUIFrameworkApi.h"
 #include "RPSUIInputApi.h"
-#include "ROCKProviderApi.h"
 
 #include <array>
 #include <atomic>
@@ -238,9 +237,9 @@ namespace rpsui
             const sdk::InputFrameV1& snapshot) noexcept;
         [[nodiscard]] bool requestInputSuppressionLocked(
             const sdk::InputFrameV1& snapshot,
-            rock::provider::RockProviderHand hand) noexcept;
+            pointer_hand_selection::Hand hand) noexcept;
         void clearInputSuppressionLocked(
-            rock::provider::RockProviderHand hand) noexcept;
+            pointer_hand_selection::Hand hand) noexcept;
         void clearAllInputSuppressionLocked() noexcept;
         void clearPointerStateLocked() noexcept;
 

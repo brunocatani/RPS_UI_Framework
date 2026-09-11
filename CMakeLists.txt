@@ -49,14 +49,6 @@ endif()
 set(COMMON_LIB_F4VR_PATH
   "${COMMON_LIB_F4VR_PATH}" CACHE PATH "" FORCE)
 
-if(NOT DEFINED ROCK_SDK_PATH)
-  set(ROCK_SDK_PATH
-    "${WORKSPACE_ROOT}/main_projects/RPS_SDK/SDK/ROCK/include")
-endif()
-if(NOT EXISTS "${ROCK_SDK_PATH}/ROCKProviderApi.h")
-  message(FATAL_ERROR "ROCK SDK not found at '${ROCK_SDK_PATH}'")
-endif()
-
 project(${NAME} VERSION ${VERSION} LANGUAGES CXX)
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_DEBUG OFF)
@@ -85,8 +77,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
   UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX NOMMNOSOUND)
 target_include_directories(${PROJECT_NAME} PRIVATE
   "${SOURCE_DIR}"
-  "${SDK_INCLUDE_DIR}"
-  "${ROCK_SDK_PATH}")
+  "${SDK_INCLUDE_DIR}")
 target_link_libraries(${PROJECT_NAME} PRIVATE
   F4VRCommon::framework
   Microsoft::DirectXTK

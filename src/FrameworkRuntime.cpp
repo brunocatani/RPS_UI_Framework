@@ -13,8 +13,6 @@ namespace rpsui
 {
     namespace
     {
-        using rock::provider::RockProviderHand;
-
         constexpr std::uint32_t kTriggerButton =
             static_cast<std::uint32_t>(f4cf::vrcf::k_EButton_SteamVR_Trigger);
         constexpr std::uint32_t kFaceButton =
@@ -31,30 +29,14 @@ namespace rpsui
             rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::ShapedPanels) |
             rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::ConfigNavigation);
 
-        [[nodiscard]] constexpr std::size_t handIndex(RockProviderHand hand) noexcept
+        [[nodiscard]] constexpr std::size_t handIndex(pointer_hand_selection::Hand hand) noexcept
         {
-            return hand == RockProviderHand::Left ? 0u : 1u;
+            return hand == pointer_hand_selection::Hand::Left ? 0u : 1u;
         }
 
-        [[nodiscard]] constexpr RockProviderHand rockHand(std::size_t index) noexcept
+        [[nodiscard]] constexpr pointer_hand_selection::Hand pointerHand(std::size_t index) noexcept
         {
-            return index == 0 ? RockProviderHand::Left : RockProviderHand::Right;
-        }
-
-        [[nodiscard]] constexpr pointer_hand_selection::Hand policyHand(
-            RockProviderHand hand) noexcept
-        {
-            return hand == RockProviderHand::Left ?
-                pointer_hand_selection::Hand::Left :
-                pointer_hand_selection::Hand::Right;
-        }
-
-        [[nodiscard]] constexpr RockProviderHand rockHand(
-            pointer_hand_selection::Hand hand) noexcept
-        {
-            return hand == pointer_hand_selection::Hand::Left ?
-                RockProviderHand::Left :
-                RockProviderHand::Right;
+            return index == 0 ? pointer_hand_selection::Hand::Left : pointer_hand_selection::Hand::Right;
         }
 
         [[nodiscard]] constexpr rpsui::sdk::PhysicalHandV1 sdkHand(
@@ -70,9 +52,9 @@ namespace rpsui
         }
 
         [[nodiscard]] constexpr std::uint8_t suppressionBit(
-            RockProviderHand hand) noexcept
+            pointer_hand_selection::Hand hand) noexcept
         {
-            return hand == RockProviderHand::Left ?
+            return hand == pointer_hand_selection::Hand::Left ?
                 std::uint8_t{ 1u << 0 } :
                 std::uint8_t{ 1u << 1 };
         }
@@ -791,7 +773,7 @@ namespace rpsui
     }
 
     bool FrameworkRuntime::requestInputSuppressionLocked(
-        const sdk::InputFrameV1& snapshot, RockProviderHand hand) noexcept
+        const sdk::InputFrameV1& snapshot, pointer_hand_selection::Hand hand) noexcept
     {
         bool config = false;
         for (const auto& panel : panels_)
@@ -801,7 +783,7 @@ namespace rpsui
         return accepted && snapshot.ready;
     }
 
-    void FrameworkRuntime::clearInputSuppressionLocked(RockProviderHand hand) noexcept
+    void FrameworkRuntime::clearInputSuppressionLocked(pointer_hand_selection::Hand hand) noexcept
     {
         input::captureHost(static_cast<unsigned>(handIndex(hand)), false, false);
         suppressedHands_ &= static_cast<std::uint8_t>(~suppressionBit(hand));
@@ -809,8 +791,8 @@ namespace rpsui
 
     void FrameworkRuntime::clearAllInputSuppressionLocked() noexcept
     {
-        clearInputSuppressionLocked(RockProviderHand::Left);
-        clearInputSuppressionLocked(RockProviderHand::Right);
+        clearInputSuppressionLocked(pointer_hand_selection::Hand::Left);
+        clearInputSuppressionLocked(pointer_hand_selection::Hand::Right);
     }
 
     void FrameworkRuntime::clearPointerStateLocked() noexcept
@@ -906,8 +888,8 @@ namespace rpsui
         }
 
         for (std::size_t index = 0; index < samples.size(); ++index) {
-            const auto hand = rockHand(index);
-            const auto selectedPolicyHand = policyHand(hand);
+            const auto hand = pointerHand(index);
+            const auto selectedPolicyHand = hand;
             const bool ownsPress =
                 pointerSelection_.active == selectedPolicyHand &&
                 pointerSelection_.submittedPrimaryDown &&
@@ -964,7 +946,7 @@ namespace rpsui
 
         if (activeResize_.active) {
             const std::size_t index =
-                handIndex(rockHand(activeResize_.hand));
+                handIndex(activeResize_.hand);
             auto& sample = samples[index];
             auto* panel = findPanelLocked(activeResize_.panelHandle);
             const auto resizeHand = activeResize_.hand;

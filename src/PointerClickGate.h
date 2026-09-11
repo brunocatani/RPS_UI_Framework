@@ -16,8 +16,8 @@ namespace rpsui::pointer_click_gate
         state = {};
     }
 
-    // ROCK applies a suppression request after native input has already been
-    // sampled for that provider frame. Forwarding therefore begins only on a
+    // Capture is requested after native input has already been sampled for
+    // the current frame. Forwarding therefore begins only on a
     // later frame, after physical neutral has been observed under the lease.
     [[nodiscard]] inline bool advance(
         State& state,

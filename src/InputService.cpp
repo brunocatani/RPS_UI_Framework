@@ -9,11 +9,10 @@
 
 namespace rpsui::input {
 namespace {
-using namespace rock::provider;
 constexpr std::uint64_t trigger=1ull<<33,grip=1ull<<2,accept=1ull<<7;
 constexpr unsigned maxClients=16;
 struct Client {
- std::uint64_t token{},rockOwner{};sdk::InputCallbackV1 callback{};void* context{};
+ std::uint64_t token{};sdk::InputCallbackV1 callback{};void* context{};
  std::shared_ptr<PanelCallbackGate> gate;
  bool closing{};std::uint64_t renewed{};
 };
@@ -25,11 +24,9 @@ struct State {
  std::uint64_t nextToken{1};
  std::array<PollCapture,maxClients+1> masks;
  sdk::InputFrameV1 frame;
- RockProviderFrameSnapshot rock;
- std::atomic_bool installed{},session{},useRock{},allowPollCapture{},captureHealthy{true};
+ std::atomic_bool installed{},session{},allowPollCapture{};
  std::atomic_uint32_t devices[2]{vr::k_unTrackedDeviceIndexInvalid,vr::k_unTrackedDeviceIndexInvalid};
  std::atomic_uint64_t raw[2]{};
- std::uint64_t rockOwner{},rockCallback{};
  bool hostCapture[2]{},hostConfig[2]{};
  unsigned failureStage{};
  unsigned handStage[2]{};
@@ -59,18 +56,21 @@ bool prefix(std::uintptr_t rva,std::initializer_list<unsigned char> expected) {
  }
  return true;
 }
+bool RPSUI_CALL rawInputReadActive() noexcept {return selfRead;}
+std::uint64_t RPSUI_CALL capturedButtons(unsigned side,std::uint64_t leftPressed,std::uint64_t rightPressed) noexcept {
+ auto& s=state();if(side>=2 || !s.allowPollCapture.load())return 0;
+ std::uint64_t mask=0;
+ for(const auto& entry:s.masks)
+  mask|=input_policy::capturedMask(side,entry.buttons[side].load(),entry.chord[0].load(),entry.chord[1].load(),leftPressed,rightPressed);
+ return mask;
+}
 void filter(vr::TrackedDeviceIndex_t device,vr::VRControllerState_t* sample) noexcept {
  auto& s=state();int side=-1;
  for(int i=0;i<2;++i)if(device==s.devices[i].load()){side=i;break;}
  if(side<0 || !sample)return;
  s.raw[side]=sample->ulButtonPressed;
- if(selfRead || s.useRock.load() || !s.allowPollCapture.load())return;
- std::uint64_t mask=0;
- for(const auto& entry:s.masks) {
-  mask|=entry.buttons[side].load();
-  const auto left=entry.chord[0].load(),right=entry.chord[1].load();
-  if(input_policy::chordHeld(s.raw[0].load(),s.raw[1].load(),left,right))mask|=side?right:left;
- }
+ if(selfRead)return;
+ const auto mask=capturedButtons(side,s.raw[0].load(),s.raw[1].load());
  sample->ulButtonPressed&=~mask;sample->ulButtonTouched&=~mask;
  const auto axes=input_policy::axesForButtons(mask);
  for(unsigned axis=0;axis<vr::k_unControllerStateAxisCount;++axis)
@@ -109,86 +109,13 @@ unsigned nativeHand(std::uintptr_t player,std::uintptr_t offset,sdk::HandInputV1
 void publishMask(unsigned slot,const sdk::InputCaptureV1& capture) {
  auto& s=state();for(unsigned hand=0;hand<2;++hand){s.masks[slot].buttons[hand]=capture.buttons[hand];s.masks[slot].chord[hand]=capture.chord[hand];}
 }
-std::uint64_t registerRockInputOwner() {
- auto* api=RockProviderApi::inst;if(!api)return 0;
- RockProviderConsumerRegistrationV1 registration{};std::snprintf(registration.modName,sizeof(registration.modName),"RPS UI input consumer");
- registration.requestedCapabilities=static_cast<unsigned>(RockProviderConsumerCapabilityV1::HandInputSuppression);
- RockProviderConsumerHandleV1 handle{};
- if(api->registerConsumerV1(&registration,&handle)==RockProviderResultV1::Ok && (handle.grantedCapabilities&registration.requestedCapabilities)==registration.requestedCapabilities)return handle.ownerToken;
- if(handle.ownerToken)(void)api->unregisterConsumerV1(handle.ownerToken);return 0;
-}
-void ROCK_PROVIDER_CALL providerFrame(const RockProviderFrameSnapshot*,void*) noexcept;
-bool connectRock() {
- auto& s=state();
- if(RockProviderApi::initialize(ROCK_PROVIDER_API_VERSION,ROCK_PROVIDER_API_V1_RAW_WAND_THUMBSTICK_TABLE_BYTES)!=0 || !RockProviderApi::inst)
-  return GetModuleHandleW(L"ROCK.dll")==nullptr;
- auto* api=RockProviderApi::inst;
- if(!api->registerConsumerV1 || !api->unregisterConsumerV1 || !api->registerFrameCallbackForOwnerV1 || !api->getFrameSnapshot || !api->getRawWandButtonStateV1 || !api->getRawWandThumbstickV1 || !api->setHandInputSuppressionV1 || !api->clearHandInputSuppressionV1)return false;
- RockProviderConsumerRegistrationV1 registration{};std::snprintf(registration.modName,sizeof(registration.modName),"RPS UI input");
- registration.requestedCapabilities=static_cast<unsigned>(RockProviderConsumerCapabilityV1::FrameSnapshots)|static_cast<unsigned>(RockProviderConsumerCapabilityV1::HandInputSuppression);
- RockProviderConsumerHandleV1 handle{};
- if(api->registerConsumerV1(&registration,&handle)==RockProviderResultV1::Ok && (handle.grantedCapabilities&registration.requestedCapabilities)==registration.requestedCapabilities)s.rockOwner=handle.ownerToken;
- else if(handle.ownerToken)(void)api->unregisterConsumerV1(handle.ownerToken);
- if(!s.rockOwner)return false;
- if(api->registerFrameCallbackForOwnerV1(s.rockOwner,providerFrame,nullptr,&s.rockCallback)!=RockProviderResultV1::Ok || !s.rockCallback) {
-  (void)api->unregisterConsumerV1(s.rockOwner);s.rockOwner=0;return false;
- }
- return true;
-}
-bool applyRockCapture(std::uint64_t owner,unsigned slot) {
- auto& s=state();if(!owner)return !s.useRock.load();
- for(unsigned side=0;side<2;++side) {
-  const auto hand=side?RockProviderHand::Right:RockProviderHand::Left;
-  const auto buttons=s.masks[slot].buttons[side].load();
-  const auto left=s.masks[slot].chord[0].load(),right=s.masks[slot].chord[1].load();
-  const auto ownChord=side?right:left;
-  if(!s.useRock.load() || !s.frame.ready || (!buttons && !ownChord)) {
-   (void)RockProviderApi::inst->clearHandInputSuppressionV1(owner,hand);continue;
-  }
-  RockProviderHandInputSuppressionRequestV1 request{};request.hand=hand;request.leaseFrames=3;
-  request.worldGeneration=s.rock.worldGeneration;request.skeletonGeneration=s.rock.skeletonGeneration;request.providerGeneration=s.rock.providerGeneration;
-  if(ownChord) {
-   request.flags=static_cast<unsigned>(RockProviderHandInputSuppressionFlagV1::ReserveButtonChord);
-   request.chordButtonsLow[0]=static_cast<std::uint32_t>(left);request.chordButtonsHigh[0]=static_cast<std::uint32_t>(left>>32);
-   request.chordButtonsLow[1]=static_cast<std::uint32_t>(right);request.chordButtonsHigh[1]=static_cast<std::uint32_t>(right>>32);
-  }
-  if(buttons)request.flags|=static_cast<unsigned>(RockProviderHandInputSuppressionFlagV1::SuppressOpenVrGameInput)|static_cast<unsigned>(RockProviderHandInputSuppressionFlagV1::SuppressConfigModeChord)|static_cast<unsigned>(RockProviderHandInputSuppressionFlagV1::SuppressNativeVats)|static_cast<unsigned>(RockProviderHandInputSuppressionFlagV1::SuppressNativeVans);
-  const auto result=RockProviderApi::inst->setHandInputSuppressionV1(owner,&request);
-  if(result!=RockProviderResultV1::Ok) {
-   s.frame.ready=false;s.allowPollCapture=false;s.captureHealthy=false;
-   static bool logged=false;if(!logged){logged=true;log::error("ROCK input capture rejected ({})",static_cast<unsigned>(result));}
-  }
- }
- return s.captureHealthy.load();
-}
-void rockCapture() {
- auto& s=state();if(!s.rockOwner)return;
- std::array<std::uint64_t,maxClients+1> owners{};owners[0]=s.rockOwner;
- {std::scoped_lock lock(s.mutex);for(unsigned i=0;i<maxClients;++i)owners[i+1]=s.clients[i].rockOwner;}
- for(unsigned slot=0;slot<=maxClients;++slot)if(owners[slot])(void)applyRockCapture(owners[slot],slot);
-}
-void update(const RockProviderFrameSnapshot* provider=nullptr) {
+void update() {
  auto& s=state();++s.frame.sequence;s.frame.seconds=std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
  s.frame.ready=false;s.frame.hands[0]={};s.frame.hands[1]={};
- if(provider)s.rock=*provider;
- const auto source=input_policy::selectSource(s.rockOwner!=0,provider && provider->providerReady);
- s.useRock=s.rockOwner!=0;
  unsigned stage=0;
  if(!s.session.load())stage=1;
  else if(blockedMenu())stage=2;
- else if(!s.captureHealthy.load())stage=6;
- else if(source==input_policy::Source::Unavailable)stage=7;
- else if(source==input_policy::Source::Rock) {
-  s.frame.ready=!s.rock.menuBlocking && !s.rock.configBlocking;
-  s.frame.leftHanded=s.rock.primaryHand==RockProviderHand::Left;
-  for(unsigned side=0;side<2;++side) {
-   auto& hand=s.frame.hands[side];const auto& transform=side?s.rock.rightHandTransform:s.rock.leftHandTransform;
-   std::copy_n(transform.translate,3,hand.position);std::copy_n(transform.rotate,3,hand.forward);
-   const auto physical=side?RockProviderHand::Right:RockProviderHand::Left;bool valid=true;
-   for(unsigned button:{1u,2u,7u,32u,33u}){RockProviderRawWandButtonStateV1 raw{};valid&=RockProviderApi::inst->getRawWandButtonStateV1(physical,button,&raw) && raw.available;if(raw.held)hand.pressed|=1ull<<button;}
-   (void)RockProviderApi::inst->getRawWandThumbstickV1(physical,&hand.stick[0],&hand.stick[1]);hand.valid=valid;
-  }
- }else {
+ else {
   auto* system=vr::VRSystem();const auto player=reinterpret_cast<std::uintptr_t>(RE::PlayerCharacter::GetSingleton());
   std::uint8_t leftHanded{};
   if(!system || !installPolling())stage=3;
@@ -208,44 +135,36 @@ void update(const RockProviderFrameSnapshot* provider=nullptr) {
    if(!s.frame.ready)stage=5;
   }
  }
- if(stage!=s.failureStage){s.failureStage=stage;log::info("UI input availability stage={} (0=ready, 1=session, 2=menu, 3=OpenVR, 4=player, 5=wand, 6=capture, 7=ROCK unavailable)",stage);}
+ if(stage!=s.failureStage){s.failureStage=stage;log::info("UI input availability stage={} (0=ready, 1=session, 2=menu, 3=OpenVR, 4=player, 5=wand)",stage);}
  s.allowPollCapture=s.frame.ready;
  FrameworkRuntime::get().handleInputFrame(s.frame);
  std::array<Client,maxClients> callbacks;
  {std::scoped_lock lock(s.mutex);callbacks=s.clients;}
  for(const auto& client:callbacks)if(client.token){PanelCallbackScope scope(client.gate);if(scope)client.callback(&s.frame,client.context);}
  {std::scoped_lock lock(s.mutex);for(unsigned i=0;i<maxClients;++i)if(!s.frame.ready || s.frame.sequence-s.clients[i].renewed>3)publishMask(i+1,{});}
- rockCapture();
 }
-void safeUpdate(const RockProviderFrameSnapshot* provider=nullptr) noexcept {
- try{update(provider);}catch(...){auto& s=state();s.allowPollCapture=false;s.frame.ready=false;for(unsigned i=0;i<=maxClients;++i)publishMask(i,{});static bool logged=false;if(!logged){logged=true;log::error("UI input frame failed; capture released");}}
-}
-void ROCK_PROVIDER_CALL providerFrame(const RockProviderFrameSnapshot* snapshot,void*) noexcept {
- // A loaded ROCK owns controller input even while its provider is unavailable.
- // Lifecycle notifications clear UI interaction instead of enabling native input.
- if(snapshot && state().installed.load())safeUpdate(snapshot);
+void safeUpdate() noexcept {
+ try{update();}catch(...){auto& s=state();s.allowPollCapture=false;s.frame.ready=false;for(unsigned i=0;i<=maxClients;++i)publishMask(i,{});static bool logged=false;if(!logged){logged=true;log::error("UI input frame failed; capture released");}}
 }
 void tick(std::uint64_t argument) {
  originalTick(argument);
- auto& s=state();RockProviderFrameSnapshot snapshot;
- if(s.rockCallback && RockProviderApi::inst->getFrameSnapshot(&snapshot) && snapshot.providerReady)return;
  safeUpdate();
 }
 std::uint64_t RPSUI_CALL subscribe(sdk::InputCallbackV1 callback,void* context) noexcept {
  try{if(!callback)return 0;auto& s=state();std::scoped_lock lock(s.mutex);
-  for(auto& client:s.clients)if(!client.token && s.nextToken!=UINT64_MAX){Client value;value.gate=std::make_shared<PanelCallbackGate>();value.token=s.nextToken++;value.rockOwner=s.rockOwner?registerRockInputOwner():0;value.callback=callback;value.context=context;client=std::move(value);return client.token;}
+  for(auto& client:s.clients)if(!client.token && s.nextToken!=UINT64_MAX){Client value;value.gate=std::make_shared<PanelCallbackGate>();value.token=s.nextToken++;value.callback=callback;value.context=context;client=std::move(value);return client.token;}
  }catch(...){log::error("UI input subscription failed");}return 0;
 }
 bool RPSUI_CALL unsubscribe(std::uint64_t token) noexcept {
  auto& s=state();std::scoped_lock lock(s.mutex);
- for(unsigned i=0;i<maxClients;++i)if(s.clients[i].token==token && token){s.clients[i].closing=true;publishMask(i+1,{});if(!s.clients[i].gate->close())return false;if(s.clients[i].rockOwner)(void)RockProviderApi::inst->unregisterConsumerV1(s.clients[i].rockOwner);s.clients[i]={};return true;}return false;
+ for(unsigned i=0;i<maxClients;++i)if(s.clients[i].token==token && token){s.clients[i].closing=true;publishMask(i+1,{});if(!s.clients[i].gate->close())return false;s.clients[i]={};return true;}return false;
 }
 bool RPSUI_CALL capture(std::uint64_t token,const sdk::InputCaptureV1* request) noexcept {
  if(!request || request->structSize!=sizeof(*request))return false;
  constexpr auto allowed=(1ull<<1)|(1ull<<2)|(1ull<<7)|(1ull<<32)|(1ull<<33);
  for(unsigned hand=0;hand<2;++hand)if((request->buttons[hand]|request->chord[hand])&~allowed)return false;
  auto& s=state();std::scoped_lock lock(s.mutex);
- for(unsigned i=0;i<maxClients;++i)if(s.clients[i].token==token && token){if(s.clients[i].closing || (s.useRock.load() && !s.clients[i].rockOwner))return false;s.clients[i].renewed=s.frame.sequence;publishMask(i+1,*request);return applyRockCapture(s.clients[i].rockOwner,i+1);}return false;
+ for(unsigned i=0;i<maxClients;++i)if(s.clients[i].token==token && token){if(s.clients[i].closing)return false;s.clients[i].renewed=s.frame.sequence;publishMask(i+1,*request);return true;}return false;
 }
 }
 bool start() noexcept {
@@ -262,25 +181,21 @@ bool start() noexcept {
   const auto target=REL::Offset(0xd84063).address()+relative;MEMORY_BASIC_INFORMATION memory{};
   if(!VirtualQuery(reinterpret_cast<void*>(target),&memory,sizeof(memory)) || memory.State!=MEM_COMMIT ||
      (memory.Protect&(PAGE_GUARD|PAGE_NOACCESS)) || !(memory.Protect&(PAGE_EXECUTE|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY)))return false;
-  if(!connectRock()){log::error("Loaded ROCK could not register UI input; refusing conflicting input hooks");return false;}
-  s.useRock=s.rockOwner!=0;
-  log::info("UI controller input source: {}",s.rockOwner?"ROCK (native polling disabled)":"native wands / OpenVR");
-  {std::scoped_lock lock(s.mutex);for(auto& client:s.clients)if(client.token && s.rockOwner)client.rockOwner=registerRockInputOwner();}
   originalTick=reinterpret_cast<GameTick>(F4SE::GetTrampoline().write_call<5>(REL::Offset(0xd8405e).address(),&tick));
-  s.installed=originalTick!=nullptr;log::info("Independent UI input installed; optional ROCK owner={}",s.rockOwner);return s.installed;
+  s.installed=originalTick!=nullptr;log::info("Independent UI input installed: native controller tracking, OpenVR buttons and UI capture");return s.installed;
  }catch(...){log::error("Independent UI input installation failed");return false;}
 }
 bool installed() noexcept{return state().installed.load();}
-void sessionReady(bool ready) noexcept{state().session=ready;if(!ready)state().allowPollCapture=false;else state().captureHealthy=true;}
+void sessionReady(bool ready) noexcept{state().session=ready;if(!ready)state().allowPollCapture=false;}
 bool rawButton(unsigned hand,unsigned button) noexcept{return hand<2 && button<64 && (state().frame.hands[hand].pressed&(1ull<<button));}
 bool captureHost(unsigned hand,bool active,bool configNavigation) noexcept {
  auto& s=state();if(hand>=2)return false;s.hostCapture[hand]=active;s.hostConfig[hand]=configNavigation;
  // The pointing stick scrolls the panel; its analog axis must not also move
  // the player. Raw UI sampling remains unfiltered.
  sdk::InputCaptureV1 request;for(unsigned side=0;side<2;++side)if(s.hostCapture[side])request.buttons[side]=trigger|accept|(1ull<<32)|(s.hostConfig[side]?grip:0);
- publishMask(0,request);return applyRockCapture(s.rockOwner,0);
+ publishMask(0,request);return true;
 }
 }
 extern "C" __declspec(dllexport) const rpsui::sdk::InputApiV1* RPSUI_CALL RPSUI_RequestInputApi() noexcept {
- static const rpsui::sdk::InputApiV1 api{.subscribe=&rpsui::input::subscribe,.unsubscribe=&rpsui::input::unsubscribe,.capture=&rpsui::input::capture};return &api;
+ static const rpsui::sdk::InputApiV1 api{.subscribe=&rpsui::input::subscribe,.unsubscribe=&rpsui::input::unsubscribe,.capture=&rpsui::input::capture,.rawInputReadActive=&rpsui::input::rawInputReadActive,.capturedButtons=&rpsui::input::capturedButtons};return &api;
 }

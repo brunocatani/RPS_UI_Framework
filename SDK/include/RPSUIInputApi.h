@@ -36,6 +36,13 @@ struct InputApiV1 {
  // False means a callback is in flight; caller retains callback/context and retries.
  bool(RPSUI_CALL* unsubscribe)(std::uint64_t) noexcept{};
  bool(RPSUI_CALL* capture)(std::uint64_t,const InputCaptureV1*) noexcept{};
+ // Optional cooperation for other input hooks. True only on the calling
+ // thread while the UI samples physical OpenVR state; leave that read raw.
+ bool(RPSUI_CALL* rawInputReadActive)() noexcept{};
+ // Read-only, lock-free query from any input thread. Physical hand: 0=left,
+ // 1=right. Supply current physical button levels to resolve pending chords.
+ // Returns zero outside gameplay or after capture has been released/expired.
+ std::uint64_t(RPSUI_CALL* capturedButtons)(unsigned hand,std::uint64_t leftPressed,std::uint64_t rightPressed) noexcept{};
 };
 inline const InputApiV1* RequestInputApiV1() noexcept {
  const auto module=GetModuleHandleW(L"RPS_UI_Framework.dll");

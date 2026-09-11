@@ -230,10 +230,14 @@ int main()
 {
     try {
         using namespace rpsui::input_policy;
-        require(selectSource(false, false) == Source::Native, "standalone input unavailable without ROCK");
-        require(selectSource(true, true) == Source::Rock, "ready ROCK did not own controller input");
-        require(selectSource(true, false) == Source::Unavailable, "unavailable ROCK activated competing native input");
         constexpr auto trigger=1ull<<33, grip=1ull<<2, face=1ull<<7;
+        require(capturedMask(0, face, grip, trigger, 0, trigger) == face, "partial chord captured an unowned grip");
+        require(capturedMask(0, 0, grip, trigger, grip, trigger) == grip, "cross-hand capture lost left grip");
+        require(capturedMask(1, 0, grip, trigger, grip, trigger) == trigger, "cross-hand capture lost right trigger");
+        require(capturedMask(1, face, 0, trigger | grip, 0, 0) == face, "held capture disappeared on physical release");
+        require(capturedMask(2, face, grip, trigger, grip, trigger) == 0, "invalid hand acquired capture");
+        require((capturedMask(1, 0, grip, trigger, 0, trigger) |
+            capturedMask(1, 0, 0, face, 0, trigger)) == 0, "separate incomplete chords combined into capture");
         require(chordHeld(grip,trigger,grip,trigger),"cross-hand chord did not capture both members");
         require(!chordHeld(grip,0,grip,trigger),"partial cross-hand chord captured input");
         require(chordHeld(0,trigger|grip|face,0,trigger|grip),"same-hand chord rejected additional buttons");
