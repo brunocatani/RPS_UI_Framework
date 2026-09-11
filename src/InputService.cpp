@@ -271,7 +271,9 @@ void sessionReady(bool ready) noexcept{state().session=ready;if(!ready)state().a
 bool rawButton(unsigned hand,unsigned button) noexcept{return hand<2 && button<64 && (state().frame.hands[hand].pressed&(1ull<<button));}
 bool captureHost(unsigned hand,bool active,bool configNavigation) noexcept {
  auto& s=state();if(hand>=2)return false;s.hostCapture[hand]=active;s.hostConfig[hand]=configNavigation;
- sdk::InputCaptureV1 request;for(unsigned side=0;side<2;++side)if(s.hostCapture[side])request.buttons[side]=trigger|accept|(s.hostConfig[side]?grip:0);
+ // The pointing stick scrolls the panel; its analog axis must not also move
+ // the player. Raw UI sampling remains unfiltered.
+ sdk::InputCaptureV1 request;for(unsigned side=0;side<2;++side)if(s.hostCapture[side])request.buttons[side]=trigger|accept|(1ull<<32)|(s.hostConfig[side]?grip:0);
  publishMask(0,request);return applyRockCapture(s.rockOwner,0);
 }
 }
