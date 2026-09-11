@@ -61,8 +61,6 @@ foreach ($token in @(
     'pointer_click_gate::advance(',
     'contextual_scroll::update(',
     'panel_resize::hitTest(',
-    'SuppressOpenVrGameInput',
-    'registerFrameCallbackForOwnerV1',
     'separateNewPanelLocked'
 )) {
     if (-not $runtime.Contains($token)) {

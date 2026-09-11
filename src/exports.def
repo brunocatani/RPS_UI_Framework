@@ -4,3 +4,4 @@ EXPORTS
     F4SEPlugin_Load
     RPSUI_RequestApi
     RPSUI_RequestCooperationApi
+    RPSUI_RequestInputApi

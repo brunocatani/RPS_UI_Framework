@@ -8,6 +8,7 @@
 #include "PanelCooperation.h"
 
 #include "RPSUIFrameworkApi.h"
+#include "RPSUIInputApi.h"
 #include "ROCKProviderApi.h"
 
 #include <array>
@@ -78,6 +79,7 @@ namespace rpsui
         static FrameworkRuntime& get() noexcept;
 
         void start() noexcept;
+        void handleInputFrame(const sdk::InputFrameV1& snapshot) noexcept;
         void setRendererReady(bool ready) noexcept;
         void setHookStatus(sdk::HookStatusV1 status) noexcept;
         [[nodiscard]] bool isReady() const noexcept;
@@ -218,15 +220,6 @@ namespace rpsui
         sdk::ResultV1 unregisterPanelImpl(std::uint64_t ownerToken, std::uint64_t panelHandle, bool drain) noexcept;
         sdk::ResultV1 unregisterConsumerImpl(std::uint64_t ownerToken, bool drain) noexcept;
 
-        static void ROCK_PROVIDER_CALL onRockFrame(
-            const rock::provider::RockProviderFrameSnapshot* snapshot,
-            void* userData) noexcept;
-
-        void handleRockFrame(
-            const rock::provider::RockProviderFrameSnapshot& snapshot) noexcept;
-        [[nodiscard]] bool connectRockProvider(bool logFailure) noexcept;
-        void discoveryLoop(std::stop_token stopToken) noexcept;
-
         [[nodiscard]] PanelRecord* findPanelLocked(
             std::uint64_t panelHandle) noexcept;
         [[nodiscard]] const PanelRecord* findPanelLocked(
@@ -242,9 +235,9 @@ namespace rpsui
         void separateNewPanelLocked(PanelRecord& panel) noexcept;
         void updateDepthRequestLocked() const noexcept;
         void updatePointerLocked(
-            const rock::provider::RockProviderFrameSnapshot& snapshot) noexcept;
+            const sdk::InputFrameV1& snapshot) noexcept;
         [[nodiscard]] bool requestInputSuppressionLocked(
-            const rock::provider::RockProviderFrameSnapshot& snapshot,
+            const sdk::InputFrameV1& snapshot,
             rock::provider::RockProviderHand hand) noexcept;
         void clearInputSuppressionLocked(
             rock::provider::RockProviderHand hand) noexcept;
@@ -260,9 +253,6 @@ namespace rpsui
         std::atomic_bool rendererReady_{ false };
         std::atomic<sdk::HookStatusV1> hookStatus_{ sdk::HookStatusV1::NotInstalled };
 
-        std::uint64_t providerOwnerToken_{ 0 };
-        std::uint64_t providerCallbackToken_{ 0 };
-        std::jthread discoveryThread_;
         std::array<HandState, 2> handState_{};
         std::array<contextual_scroll::State, 2> scrollState_{};
         pointer_hand_selection::State pointerSelection_{};

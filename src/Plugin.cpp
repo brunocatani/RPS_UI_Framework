@@ -1,6 +1,7 @@
 #include "PCH.h"
 
 #include "FrameworkRuntime.h"
+#include "InputService.h"
 #include "Logger.h"
 #include "render/RenderHooks.h"
 #include "render/SceneDepthCapture.h"
@@ -85,6 +86,11 @@ namespace
     void f4seMessageHandler(
         F4SE::MessagingInterface::Message* message) noexcept
     {
+        if (message) {
+            if (message->type == F4SE::MessagingInterface::kPreLoadGame) rpsui::input::sessionReady(false);
+            if (message->type == F4SE::MessagingInterface::kNewGame) rpsui::input::sessionReady(true);
+            if (message->type == F4SE::MessagingInterface::kPostLoadGame) rpsui::input::sessionReady(message->data != nullptr);
+        }
         if (!message ||
             message->type !=
                 F4SE::MessagingInterface::kGameDataReady) {

@@ -1,4 +1,5 @@
 #include "ContextualScrollPolicy.h"
+#include "InputCapturePolicy.h"
 #include "PanelResizePolicy.h"
 #include "PointerClickGate.h"
 #include "PointerHandSelection.h"
@@ -189,6 +190,16 @@ namespace
 int main()
 {
     try {
+        using namespace rpsui::input_policy;
+        constexpr auto trigger=1ull<<33, grip=1ull<<2, face=1ull<<7;
+        require(chordHeld(grip,trigger,grip,trigger),"cross-hand chord did not capture both members");
+        require(!chordHeld(grip,0,grip,trigger),"partial cross-hand chord captured input");
+        require(chordHeld(0,trigger|grip|face,0,trigger|grip),"same-hand chord rejected additional buttons");
+        require(!chordHeld(0,trigger,0,trigger|grip),"trigger alone was reserved by a chord");
+        require(!chordHeld(grip,trigger,0,0),"empty capture reserved input");
+        require(axesForButtons(trigger|grip)==6,"captured trigger/grip left analog input exposed");
+        require(axesForButtons(face)==0,"face-button capture changed an unrelated analog axis");
+        require(axesForButtons(1ull<<32)==1,"thumbstick capture missed its analog axis");
         testApiContract();
         testPointerSelection();
         testClickGate();

@@ -1,6 +1,7 @@
 #include "PCH.h"
 
 #include "FrameworkRuntime.h"
+#include "InputService.h"
 #include "PanelSeparationPolicy.h"
 
 #include "Logger.h"
@@ -12,33 +13,12 @@ namespace rpsui
 {
     namespace
     {
-        using rock::provider::RockProviderApi;
-        using rock::provider::RockProviderConsumerCapabilityV1;
-        using rock::provider::RockProviderConsumerHandleV1;
-        using rock::provider::RockProviderConsumerRegistrationV1;
-        using rock::provider::RockProviderFrameSnapshot;
         using rock::provider::RockProviderHand;
-        using rock::provider::RockProviderHandInputSuppressionFlagV1;
-        using rock::provider::RockProviderHandInputSuppressionRequestV1;
-        using rock::provider::RockProviderLifecycleFlag;
-        using rock::provider::RockProviderLimitsV1;
-        using rock::provider::RockProviderRawWandButtonStateV1;
-        using rock::provider::RockProviderResultV1;
 
         constexpr std::uint32_t kTriggerButton =
             static_cast<std::uint32_t>(f4cf::vrcf::k_EButton_SteamVR_Trigger);
         constexpr std::uint32_t kFaceButton =
             static_cast<std::uint32_t>(f4cf::vrcf::k_EButton_A);
-        constexpr std::uint32_t kSuppressionFlags =
-            static_cast<std::uint32_t>(
-                RockProviderHandInputSuppressionFlagV1::SuppressConfigModeChord) |
-            static_cast<std::uint32_t>(
-                RockProviderHandInputSuppressionFlagV1::SuppressOpenVrGameInput) |
-            static_cast<std::uint32_t>(
-                RockProviderHandInputSuppressionFlagV1::SuppressNativeVats) |
-            static_cast<std::uint32_t>(
-                RockProviderHandInputSuppressionFlagV1::SuppressNativeVans);
-        constexpr std::uint32_t kSuppressionLeaseFrames = 3;
         constexpr float kPointerMaximumDistance = 500.0f;
         constexpr std::uint64_t kAllFeatures =
             rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::MultipleWorldPanels) |
@@ -50,22 +30,6 @@ namespace rpsui
             rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::SharedStereoComposition) |
             rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::ShapedPanels) |
             rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::ConfigNavigation);
-
-        [[nodiscard]] bool inputReady(const RockProviderFrameSnapshot& snapshot) noexcept
-        {
-            return snapshot.providerReady != 0 &&
-                   snapshot.menuBlocking == 0 &&
-                   snapshot.configBlocking == 0 &&
-                   rock::provider::hasLifecycleFlag(
-                       snapshot.lifecycleFlags,
-                       RockProviderLifecycleFlag::WorldAvailable) &&
-                   rock::provider::hasLifecycleFlag(
-                       snapshot.lifecycleFlags,
-                       RockProviderLifecycleFlag::SkeletonReady) &&
-                   rock::provider::hasLifecycleFlag(
-                       snapshot.lifecycleFlags,
-                       RockProviderLifecycleFlag::ProviderReady);
-        }
 
         [[nodiscard]] constexpr std::size_t handIndex(RockProviderHand hand) noexcept
         {
@@ -103,14 +67,6 @@ namespace rpsui
                 return rpsui::sdk::PhysicalHandV1::Right;
             }
             return rpsui::sdk::PhysicalHandV1::None;
-        }
-
-        [[nodiscard]] constexpr f4cf::vrcf::Hand controllerHand(
-            pointer_hand_selection::Hand hand) noexcept
-        {
-            return hand == pointer_hand_selection::Hand::Left ?
-                f4cf::vrcf::Hand::Left :
-                f4cf::vrcf::Hand::Right;
         }
 
         [[nodiscard]] constexpr std::uint8_t suppressionBit(
@@ -190,10 +146,7 @@ namespace rpsui
         if (started_.exchange(true, std::memory_order_acq_rel)) {
             return;
         }
-        discoveryThread_ = std::jthread(
-            [this](std::stop_token stopToken) {
-                discoveryLoop(stopToken);
-            });
+        if (!input::start()) log::error("UI input service could not start");
         log::info("RPS UI Framework runtime started");
     }
 
@@ -211,7 +164,7 @@ namespace rpsui
     {
         std::scoped_lock lock(mutex_);
         return rendererReady_.load(std::memory_order_acquire) &&
-               providerCallbackToken_ != 0;
+               input::installed();
     }
 
     bool FrameworkRuntime::hasOpenPanels() const noexcept
@@ -556,7 +509,7 @@ namespace rpsui
             out = {};
             std::lock_guard lock(mutex_);
             out.hookStatus = hookStatus_.load(std::memory_order_acquire);
-            out.frameworkReady = rendererReady_.load(std::memory_order_acquire) && providerCallbackToken_ != 0;
+            out.frameworkReady = rendererReady_.load(std::memory_order_acquire) && input::installed();
             out.suppressedHands = suppressedHands_;
             out.focusedPanelHandle = pointerPanelHandle_;
             out.resizingPanelHandle = activeResize_.active ? activeResize_.panelHandle : 0;
@@ -833,186 +786,21 @@ namespace rpsui
         }
     }
 
-    bool FrameworkRuntime::connectRockProvider(bool logFailure) noexcept
-    {
-        try {
-            {
-                std::scoped_lock lock(mutex_);
-                if (providerCallbackToken_ != 0) {
-                    return true;
-                }
-            }
-            const auto initialized = RockProviderApi::initialize(
-                rock::provider::ROCK_PROVIDER_API_VERSION,
-                rock::provider::ROCK_PROVIDER_API_V1_RAW_WAND_THUMBSTICK_TABLE_BYTES);
-            if (initialized != 0 || !RockProviderApi::inst) {
-                if (logFailure) {
-                    log::warn("ROCK provider unavailable ({})", initialized);
-                }
-                return false;
-            }
-
-            RockProviderLimitsV1 limits{};
-            if (!RockProviderApi::inst->getProviderLimitsV1 ||
-                !RockProviderApi::inst->getProviderLimitsV1(&limits) ||
-                !rock::provider::supportsHandInputSuppressionV1(limits) ||
-                !rock::provider::supportsRawWandButtonStateV1(limits) ||
-                !rock::provider::supportsOwnerFrameCallbacksV1() ||
-                !RockProviderApi::inst->registerConsumerV1 ||
-                !RockProviderApi::inst->unregisterConsumerV1 ||
-                !RockProviderApi::inst->registerFrameCallbackForOwnerV1 ||
-                !RockProviderApi::inst->setHandInputSuppressionV1 ||
-                !RockProviderApi::inst->clearHandInputSuppressionV1 ||
-                !RockProviderApi::inst->getRawWandButtonStateV1 ||
-                !RockProviderApi::inst->getRawWandThumbstickV1) {
-                if (logFailure) {
-                    log::warn("ROCK provider lacks required UI input capabilities");
-                }
-                return false;
-            }
-
-            RockProviderConsumerRegistrationV1 registration{};
-            std::snprintf(
-                registration.modName,
-                sizeof(registration.modName),
-                "RPS UI Framework");
-            registration.requestedCapabilities =
-                static_cast<std::uint32_t>(
-                    RockProviderConsumerCapabilityV1::FrameSnapshots) |
-                static_cast<std::uint32_t>(
-                    RockProviderConsumerCapabilityV1::HandInputSuppression);
-
-            RockProviderConsumerHandleV1 handle{};
-            const auto registered =
-                RockProviderApi::inst->registerConsumerV1(
-                    &registration,
-                    &handle);
-            if (registered != RockProviderResultV1::Ok ||
-                handle.ownerToken == 0 ||
-                !rock::provider::hasConsumerCapabilityV1(
-                    handle.grantedCapabilities,
-                    RockProviderConsumerCapabilityV1::FrameSnapshots) ||
-                !rock::provider::hasConsumerCapabilityV1(
-                    handle.grantedCapabilities,
-                    RockProviderConsumerCapabilityV1::HandInputSuppression)) {
-                if (handle.ownerToken != 0) {
-                    (void)RockProviderApi::inst->unregisterConsumerV1(
-                        handle.ownerToken);
-                }
-                if (logFailure) {
-                    log::warn(
-                        "ROCK provider rejected UI host registration ({})",
-                        static_cast<std::uint32_t>(registered));
-                }
-                return false;
-            }
-
-            std::uint64_t callbackToken = 0;
-            const auto callbackResult =
-                RockProviderApi::inst->registerFrameCallbackForOwnerV1(
-                    handle.ownerToken,
-                    &FrameworkRuntime::onRockFrame,
-                    this,
-                    &callbackToken);
-            if (callbackResult != RockProviderResultV1::Ok ||
-                callbackToken == 0) {
-                (void)RockProviderApi::inst->unregisterConsumerV1(
-                    handle.ownerToken);
-                if (logFailure) {
-                    log::warn(
-                        "ROCK provider rejected UI host frame callback ({})",
-                        static_cast<std::uint32_t>(callbackResult));
-                }
-                return false;
-            }
-            {
-                std::scoped_lock lock(mutex_);
-                providerOwnerToken_ = handle.ownerToken;
-                providerCallbackToken_ = callbackToken;
-            }
-            log::info(
-                "RPS UI Framework connected to ROCK provider as owner {}",
-                handle.ownerToken);
-            return true;
-        } catch (...) {
-            return false;
-        }
-    }
-
-    void FrameworkRuntime::discoveryLoop(std::stop_token stopToken) noexcept
-    {
-        for (std::uint32_t attempt = 0;
-             !stopToken.stop_requested();
-             ++attempt) {
-            if (connectRockProvider(attempt == 0 || attempt % 10 == 9)) {
-                return;
-            }
-            for (int slice = 0;
-                 slice < 10 && !stopToken.stop_requested();
-                 ++slice) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            }
-        }
-    }
-
-    void ROCK_PROVIDER_CALL FrameworkRuntime::onRockFrame(
-        const RockProviderFrameSnapshot* snapshot,
-        void* userData) noexcept
-    {
-        if (snapshot && userData) {
-            static_cast<FrameworkRuntime*>(userData)->handleRockFrame(*snapshot);
-        }
-    }
-
     bool FrameworkRuntime::requestInputSuppressionLocked(
-        const RockProviderFrameSnapshot& snapshot,
-        RockProviderHand hand) noexcept
+        const sdk::InputFrameV1& snapshot, RockProviderHand hand) noexcept
     {
-        if (providerOwnerToken_ == 0 ||
-            !RockProviderApi::inst ||
-            !RockProviderApi::inst->setHandInputSuppressionV1) {
-            return false;
-        }
-        RockProviderHandInputSuppressionRequestV1 request{};
-        request.hand = hand;
-        request.flags = kSuppressionFlags;
-        // Do not let Config's Back press also acquire a world object. Existing
-        // grabs still receive their release; the hold wheel never requests this.
-        for (const auto& panel : panels_) {
-            if (panel.open && sdk::hasPanelFlag(panel.flags, sdk::PanelFlagV1::ConfigNavigation)) {
-                request.flags |= static_cast<std::uint32_t>(RockProviderHandInputSuppressionFlagV1::SuppressNormalGrabPress);
-                break;
-            }
-        }
-        request.leaseFrames = kSuppressionLeaseFrames;
-        request.worldGeneration = snapshot.worldGeneration;
-        request.skeletonGeneration = snapshot.skeletonGeneration;
-        request.providerGeneration = snapshot.providerGeneration;
-        const bool accepted =
-            RockProviderApi::inst->setHandInputSuppressionV1(
-                providerOwnerToken_,
-                &request) == RockProviderResultV1::Ok;
-        if (accepted) {
-            suppressedHands_ |= suppressionBit(hand);
-        }
-        return accepted;
+        bool config = false;
+        for (const auto& panel : panels_)
+            config |= panel.open && sdk::hasPanelFlag(panel.flags, sdk::PanelFlagV1::ConfigNavigation);
+        const bool accepted=input::captureHost(static_cast<unsigned>(handIndex(hand)), snapshot.ready, config);
+        if (accepted) suppressedHands_ |= suppressionBit(hand);
+        return accepted && snapshot.ready;
     }
 
-    void FrameworkRuntime::clearInputSuppressionLocked(
-        RockProviderHand hand) noexcept
+    void FrameworkRuntime::clearInputSuppressionLocked(RockProviderHand hand) noexcept
     {
-        const auto bit = suppressionBit(hand);
-        if ((suppressedHands_ & bit) == 0) {
-            return;
-        }
-        if (providerOwnerToken_ != 0 &&
-            RockProviderApi::inst &&
-            RockProviderApi::inst->clearHandInputSuppressionV1) {
-            (void)RockProviderApi::inst->clearHandInputSuppressionV1(
-                providerOwnerToken_,
-                hand);
-        }
-        suppressedHands_ &= static_cast<std::uint8_t>(~bit);
+        input::captureHost(static_cast<unsigned>(handIndex(hand)), false, false);
+        suppressedHands_ &= static_cast<std::uint8_t>(~suppressionBit(hand));
     }
 
     void FrameworkRuntime::clearAllInputSuppressionLocked() noexcept
@@ -1041,7 +829,7 @@ namespace rpsui
     }
 
     void FrameworkRuntime::updatePointerLocked(
-        const RockProviderFrameSnapshot& snapshot) noexcept
+        const sdk::InputFrameV1& snapshot) noexcept
     {
         for (auto& panel : panels_) {
             panel.input = {};
@@ -1049,28 +837,21 @@ namespace rpsui
 
         std::array<HandSample, 2> samples{};
         for (std::size_t index = 0; index < samples.size(); ++index) {
-            const auto hand = rockHand(index);
-            const auto& transform =
-                hand == RockProviderHand::Left ?
-                snapshot.leftHandTransform :
-                snapshot.rightHandTransform;
-            const float directionLength = std::sqrt(
-                transform.rotate[0] * transform.rotate[0] +
-                transform.rotate[1] * transform.rotate[1] +
-                transform.rotate[2] * transform.rotate[2]);
+            const auto& transform = snapshot.hands[index];
+            const float directionLength = std::hypot(transform.forward[0], transform.forward[1], transform.forward[2]);
             auto& sample = samples[index];
-            if (std::isfinite(directionLength) &&
+            if (transform.valid && std::isfinite(directionLength) &&
                 directionLength > 0.0001f) {
                 sample.ray = {
                     .origin = {
-                        transform.translate[0],
-                        transform.translate[1],
-                        transform.translate[2],
+                        transform.position[0],
+                        transform.position[1],
+                        transform.position[2],
                     },
                     .direction = {
-                        transform.rotate[0] / directionLength,
-                        transform.rotate[1] / directionLength,
-                        transform.rotate[2] / directionLength,
+                        transform.forward[0] / directionLength,
+                        transform.forward[1] / directionLength,
+                        transform.forward[2] / directionLength,
                     },
                     .maxDistance = kPointerMaximumDistance,
                 };
@@ -1102,32 +883,11 @@ namespace rpsui
 
             const auto* hitPanel = findPanelLocked(sample.hitPanel);
             sample.configNavigation = hitPanel && sdk::hasPanelFlag(hitPanel->flags, sdk::PanelFlagV1::ConfigNavigation);
-            if (sample.configNavigation && RockProviderApi::inst) {
-                (void)RockProviderApi::inst->getRawWandThumbstickV1(hand, &sample.stick.x, &sample.stick.y);
-                RockProviderRawWandButtonStateV1 grip{};
-                sample.rawBackAvailable = RockProviderApi::inst->getRawWandButtonStateV1(
-                    hand, static_cast<std::uint32_t>(f4cf::vrcf::k_EButton_Grip), &grip) && grip.available != 0;
-                sample.rawBackDown = sample.rawBackAvailable && grip.held != 0;
-            }
-
-            RockProviderRawWandButtonStateV1 trigger{};
-            RockProviderRawWandButtonStateV1 face{};
-            sample.rawAvailable =
-                RockProviderApi::inst &&
-                RockProviderApi::inst->getRawWandButtonStateV1 &&
-                RockProviderApi::inst->getRawWandButtonStateV1(
-                    hand,
-                    kTriggerButton,
-                    &trigger) &&
-                RockProviderApi::inst->getRawWandButtonStateV1(
-                    hand,
-                    kFaceButton,
-                    &face) &&
-                trigger.available != 0 &&
-                face.available != 0;
-            sample.rawPrimaryDown =
-                sample.rawAvailable &&
-                (trigger.held != 0 || face.held != 0);
+            sample.stick = {transform.stick[0], transform.stick[1]};
+            sample.rawBackAvailable = sample.configNavigation && transform.valid;
+            sample.rawBackDown = sample.rawBackAvailable && input::rawButton(static_cast<unsigned>(index), 2);
+            sample.rawAvailable = transform.valid;
+            sample.rawPrimaryDown = transform.valid && (input::rawButton(static_cast<unsigned>(index), kTriggerButton) || input::rawButton(static_cast<unsigned>(index), kFaceButton));
 
             auto& handState = handState_[index];
             const bool risingRaw =
@@ -1165,12 +925,12 @@ namespace rpsui
             samples[index].submittedPrimaryDown =
                 pointer_click_gate::advance(
                     handState_[index].clickGate,
-                    snapshot.frameIndex,
+                    snapshot.sequence,
                     samples[index].rawAvailable,
                     samples[index].rawPrimaryDown,
                     samples[index].leaseAccepted);
             samples[index].submittedBackDown = pointer_click_gate::advance(
-                handState_[index].backGate, snapshot.frameIndex,
+                handState_[index].backGate, snapshot.sequence,
                 samples[index].rawBackAvailable, samples[index].rawBackDown,
                 samples[index].leaseAccepted && samples[index].configNavigation);
         }
@@ -1257,7 +1017,7 @@ namespace rpsui
                 contextual_scroll::remapAxis(samples[1].stick.x) != 0 || contextual_scroll::remapAxis(samples[1].stick.y) != 0,
         };
         const auto preferred =
-            snapshot.primaryHand == RockProviderHand::Left ?
+            snapshot.leftHanded ?
             pointer_hand_selection::Hand::Left :
             pointer_hand_selection::Hand::Right;
         const auto decision = pointer_hand_selection::choose(
@@ -1360,11 +1120,7 @@ namespace rpsui
         panel->input.hovered = sdkResizeHandle(resizeHandle);
 
         panel->input.backDown = controlsPanel && sample.submittedBackDown;
-        const auto legacyStick =
-            f4cf::vrcf::VRControllers.getThumbstickValue(
-                controllerHand(decision.hand));
-        const auto stick = sample.configNavigation ? sample.stick :
-            contextual_scroll::Stick{ legacyStick.x, legacyStick.y };
+        const auto stick = sample.stick;
         const auto scroll = contextual_scroll::update(
             scrollState_[selectedIndex],
             controlsPanel,
@@ -1383,18 +1139,16 @@ namespace rpsui
         }
     }
 
-    void FrameworkRuntime::handleRockFrame(
-        const RockProviderFrameSnapshot& snapshot) noexcept
+    void FrameworkRuntime::handleInputFrame(
+        const sdk::InputFrameV1& snapshot) noexcept
     {
         try {
             std::scoped_lock lock(mutex_);
-            if (!inputReady(snapshot)) {
+            if (!snapshot.ready) {
                 clearPointerStateLocked();
                 clearAllInputSuppressionLocked();
                 return;
             }
-            f4cf::vrcf::VRControllers.update(
-                snapshot.primaryHand == RockProviderHand::Left);
             updatePointerLocked(snapshot);
         } catch (...) {
             static std::atomic_bool logged = false;
