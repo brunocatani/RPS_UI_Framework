@@ -26,8 +26,8 @@ namespace rpsui::render::SceneDepthCapture
     struct FrameDepth
     {
         Microsoft::WRL::ComPtr<ID3D11DepthStencilView> view;
-        D3D11_COMPARISON_FUNC comparison =
-            D3D11_COMPARISON_LESS_EQUAL;
+        // Diagnostic only: this is the captured pass, not the scene's ordering.
+        D3D11_COMPARISON_FUNC sourceComparison = D3D11_COMPARISON_NEVER;
         std::uint64_t frameEpoch = 0;
         std::uint64_t requestedFrameEpoch = 0;
         std::uintptr_t submittedTexture = 0;
@@ -42,9 +42,7 @@ namespace rpsui::render::SceneDepthCapture
 
         [[nodiscard]] bool IsValid() const noexcept
         {
-            return view &&
-                   comparison >= D3D11_COMPARISON_NEVER &&
-                   comparison <= D3D11_COMPARISON_ALWAYS;
+            return view.Get() != nullptr;
         }
     };
 

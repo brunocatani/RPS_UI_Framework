@@ -6,6 +6,7 @@
 #include "render/HostRenderer.h"
 #include "render/SceneDepthCapture.h"
 #include "render/StereoProjection.h"
+#include "render/WorldPanelDepth.h"
 
 #include <DirectXTK/CommonStates.h>
 #include <DirectXTK/Effects.h>
@@ -43,9 +44,7 @@ namespace rpsui::render
             std::unique_ptr<DirectX::BasicEffect> effect;
             std::unique_ptr<DirectX::PrimitiveBatch<Vertex>> batch;
             Microsoft::WRL::ComPtr<ID3D11InputLayout> inputLayout;
-            std::array<Microsoft::WRL::ComPtr<ID3D11DepthStencilState>, 9>
-                depthReadStates{};
-            std::array<bool, 9> depthStateFailed{};
+            Microsoft::WRL::ComPtr<ID3D11DepthStencilState> worldDepthState;
             std::unordered_map<std::uint64_t, PanelGpu> panelGpu;
 
             bool initialized{ false };
@@ -76,8 +75,7 @@ namespace rpsui::render
             state.effect.reset();
             state.commonStates.reset();
             state.inputLayout.Reset();
-            state.depthReadStates = {};
-            state.depthStateFailed = {};
+            state.worldDepthState.Reset();
             state.submittedRenderTarget.Reset();
             state.submittedTexture.Reset();
             state.isolatedContextState.Reset();
@@ -118,6 +116,12 @@ namespace rpsui::render
                 device->GetImmediateContext(state.context.GetAddressOf());
                 if (!state.context) {
                     throw std::runtime_error("immediate D3D11 context unavailable");
+                }
+
+                const auto depthDescription = world_panel_depth::readOnlyDescription();
+                if (FAILED(device->CreateDepthStencilState(
+                        &depthDescription, state.worldDepthState.GetAddressOf()))) {
+                    throw std::runtime_error("world-panel depth state unavailable");
                 }
 
                 state.commonStates =
@@ -335,36 +339,6 @@ namespace rpsui::render
             bool swapped_{ false };
         };
 
-        [[nodiscard]] ID3D11DepthStencilState* depthReadState(
-            Resources& state,
-            D3D11_COMPARISON_FUNC comparison) noexcept
-        {
-            const auto index = static_cast<std::size_t>(comparison);
-            if (index >= state.depthReadStates.size() ||
-                comparison < D3D11_COMPARISON_NEVER ||
-                comparison > D3D11_COMPARISON_ALWAYS) {
-                return nullptr;
-            }
-            if (state.depthReadStates[index]) {
-                return state.depthReadStates[index].Get();
-            }
-            if (state.depthStateFailed[index]) {
-                return nullptr;
-            }
-            D3D11_DEPTH_STENCIL_DESC description{};
-            description.DepthEnable = TRUE;
-            description.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
-            description.DepthFunc = comparison;
-            description.StencilEnable = FALSE;
-            if (FAILED(state.device->CreateDepthStencilState(
-                    &description,
-                    state.depthReadStates[index].GetAddressOf()))) {
-                state.depthStateFailed[index] = true;
-                return nullptr;
-            }
-            return state.depthReadStates[index].Get();
-        }
-
         [[nodiscard]] DirectX::XMFLOAT3 addScaled(
             const DirectX::XMFLOAT3& origin,
             const DirectX::XMFLOAT3& first,
@@ -402,8 +376,7 @@ namespace rpsui::render
             const SceneDepthCapture::FrameDepth& depth,
             const D3D11_TEXTURE2D_DESC& outputDescription) noexcept
         {
-            auto* depthState =
-                depthReadState(state, depth.comparison);
+            auto* depthState = state.worldDepthState.Get();
             if (!depthState ||
                 !shaderResource ||
                 outputDescription.Width < 2 ||
@@ -478,8 +451,8 @@ namespace rpsui::render
                 viewport.Width = eyeWidth;
                 viewport.Height =
                     static_cast<float>(outputDescription.Height);
-                viewport.MinDepth = 0.0f;
-                viewport.MaxDepth = 1.0f;
+                viewport.MinDepth = world_panel_depth::kMinDepth;
+                viewport.MaxDepth = world_panel_depth::kMaxDepth;
                 state.context->RSSetViewports(1, &viewport);
                 state.context->OMSetDepthStencilState(depthState, 0);
 
@@ -548,23 +521,25 @@ namespace rpsui::render
             // Count every accepted epoch so a brief comparison change is visible
             // even between the one-second samples. All state owns renderMutex.
             if (state.observedDepthEpoch != depth.frameEpoch) {
-                if (state.observedDepthEpoch && state.previousComparison != depth.comparison)
+                if (state.observedDepthEpoch && state.previousComparison != depth.sourceComparison)
                     ++state.comparisonChanges;
                 state.observedDepthEpoch = depth.frameEpoch;
-                state.previousComparison = depth.comparison;
-                ++state.observedComparisons[static_cast<std::size_t>(depth.comparison)];
+                state.previousComparison = depth.sourceComparison;
+                const auto index = static_cast<std::size_t>(depth.sourceComparison);
+                if (index < state.observedComparisons.size()) ++state.observedComparisons[index];
             }
             if (!depth.diagnostic || state.reportedDiagnosticEpoch == depth.frameEpoch) return false;
             state.reportedDiagnosticEpoch = depth.frameEpoch;
             const auto& sample = *depth.diagnostic;
             const auto& counts = state.observedComparisons;
-            log::info("RPS UI occlusion sample v1: epoch={} logicalDepth={} depth=0x{:X} submittedColor=0x{:X} "
-                "output={}x{} depthFunc={} sourceWriteMask={} sourceViewFlags={} sourceStencil={} "
+            log::info("RPS UI occlusion sample v2: epoch={} logicalDepth={} depth=0x{:X} submittedColor=0x{:X} "
+                "output={}x{} sourceDepthFunc={} uiDepthFunc={} sourceWriteMask={} sourceViewFlags={} sourceStencil={} "
                 "comparisonChanges={} framesByFunc[1..8]=[{},{},{},{},{},{},{},{}] "
                 "sourceVS=0x{:X} sourceColor=0x{:X} sourceColorSize={}x{} sourceColorFormat={} "
                 "captureProjectionValid={} captureProjectionStage={} captureProjectionError={} submitProjectionValid={}",
                 depth.frameEpoch, depth.logicalDepth, depth.capturedDepth, depth.submittedTexture,
-                output.Width, output.Height, static_cast<unsigned>(depth.comparison),
+                output.Width, output.Height, static_cast<unsigned>(depth.sourceComparison),
+                static_cast<unsigned>(world_panel_depth::kComparison),
                 static_cast<unsigned>(depth.sourceWriteMask), depth.sourceViewFlags, depth.sourceStencilEnabled,
                 state.comparisonChanges, counts[1], counts[2], counts[3], counts[4], counts[5], counts[6], counts[7], counts[8],
                 sample.vertexShader, sample.colorTexture, sample.colorDescription.Width, sample.colorDescription.Height,

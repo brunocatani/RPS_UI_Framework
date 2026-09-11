@@ -46,8 +46,7 @@ namespace rpsui::render::SceneDepthCapture
             Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
             D3D11_TEXTURE2D_DESC textureDescription{};
             D3D11_DEPTH_STENCIL_VIEW_DESC viewDescription{};
-            D3D11_COMPARISON_FUNC comparison =
-                D3D11_COMPARISON_LESS_EQUAL;
+            D3D11_COMPARISON_FUNC sourceComparison = D3D11_COMPARISON_NEVER;
             std::uint64_t frameEpoch = 0;
             std::uint32_t logicalDepth = 0;
             D3D11_DEPTH_WRITE_MASK writeMask = D3D11_DEPTH_WRITE_MASK_ZERO;
@@ -435,7 +434,7 @@ namespace rpsui::render::SceneDepthCapture
                     depthDescription;
                 g_capture.viewDescription =
                     viewDescription;
-                g_capture.comparison = comparison;
+                g_capture.sourceComparison = comparison;
                 g_capture.frameEpoch = epoch;
                 g_capture.logicalDepth = scene.logicalDepth;
                 g_capture.writeMask = stateDescription.DepthWriteMask;
@@ -623,7 +622,7 @@ namespace rpsui::render::SceneDepthCapture
         }
 
         result.view = snapshot.readOnlyView;
-        result.comparison = snapshot.comparison;
+        result.sourceComparison = snapshot.sourceComparison;
         result.frameEpoch = snapshot.frameEpoch;
         result.failureReason = nullptr;
         result.sourceWriteMask = snapshot.writeMask;
@@ -632,14 +631,14 @@ namespace rpsui::render::SceneDepthCapture
         result.diagnostic = snapshot.diagnostic;
         if (!g_reportedDepthMatch.exchange(true, std::memory_order_relaxed)) {
             log::info("RPS UI first depth match: epoch={} color=0x{:X} sceneDepthLogical={} depth=0x{:X} submitted={}x{} format={} samples={}/{} "
-                "depth={}x{} format={} samples={}/{} viewDimension={} depthFunc={}",
+                "depth={}x{} format={} samples={}/{} viewDimension={} sourceDepthFunc={}",
                 result.frameEpoch, result.submittedTexture, scene.logicalDepth, result.capturedDepth,
                 colorDescription.Width, colorDescription.Height, static_cast<unsigned>(colorDescription.Format),
                 colorDescription.SampleDesc.Count, colorDescription.SampleDesc.Quality,
                 snapshot.textureDescription.Width, snapshot.textureDescription.Height,
                 static_cast<unsigned>(snapshot.textureDescription.Format), snapshot.textureDescription.SampleDesc.Count,
                 snapshot.textureDescription.SampleDesc.Quality, static_cast<unsigned>(snapshot.viewDescription.ViewDimension),
-                static_cast<unsigned>(snapshot.comparison));
+                static_cast<unsigned>(snapshot.sourceComparison));
         }
         return result;
     }
