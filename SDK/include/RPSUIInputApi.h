@@ -30,6 +30,12 @@ struct InputCaptureV1 {
  // Once captured, publish buttons until all chord members have been released.
  std::uint64_t chord[2]{};
 };
+struct PointerAimV1 {
+ std::uint32_t structSize{sizeof(PointerAimV1)};
+ // Physical hands: left=0, right=1. Degrees relative to native controller
+ // forward: positive pitch aims up, positive yaw aims right. Range [-90,90].
+ float pitchDegrees[2]{},yawDegrees[2]{};
+};
 struct InputApiV1 {
  std::uint32_t structSize{sizeof(InputApiV1)},version{1};
  std::uint64_t(RPSUI_CALL* subscribe)(InputCallbackV1,void*) noexcept{};
@@ -43,6 +49,9 @@ struct InputApiV1 {
  // 1=right. Supply current physical button levels to resolve pending chords.
  // Returns zero outside gameplay or after capture has been released/expired.
  std::uint64_t(RPSUI_CALL* capturedButtons)(unsigned hand,std::uint64_t leftPressed,std::uint64_t rightPressed) noexcept{};
+ // Game thread only. Sets shared UI aim; the settings host (PALM) owns
+ // persistence. Changes apply on the next input frame to every UI panel.
+ bool(RPSUI_CALL* setPointerAim)(const PointerAimV1*) noexcept{};
 };
 inline const InputApiV1* RequestInputApiV1() noexcept {
  const auto module=GetModuleHandleW(L"RPS_UI_Framework.dll");

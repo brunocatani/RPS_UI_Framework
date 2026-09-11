@@ -24,6 +24,7 @@ struct State {
  std::uint64_t nextToken{1};
  std::array<PollCapture,maxClients+1> masks;
  sdk::InputFrameV1 frame;
+ std::array<std::array<float,3>,2> aim{{{0,1,0},{0,1,0}}};
  std::atomic_bool installed{},session{},allowPollCapture{};
  std::atomic_uint32_t devices[2]{vr::k_unTrackedDeviceIndexInvalid,vr::k_unTrackedDeviceIndexInvalid};
  std::atomic_uint64_t raw[2]{};
@@ -100,11 +101,11 @@ bool blockedMenu() {
  for(const auto& name:names)if(ui->GetMenuOpen(name))return true;
  return false;
 }
-unsigned nativeHand(std::uintptr_t player,std::uintptr_t offset,sdk::HandInputV1& hand) {
+unsigned nativeHand(std::uintptr_t player,std::uintptr_t offset,sdk::HandInputV1& hand,const std::array<float,3>& aim) {
  std::uintptr_t node{};RE::NiTransform transform{};
  if(!read(player+offset,node) || node<0x10000 || node>0x00007fffffffffff || node%alignof(void*))return 1;
  if(!read(node+offsetof(RE::NiAVObject,world),transform))return 2;
- return input_policy::nativeWandPose(transform,hand)?0:3;
+ return input_policy::nativeWandPose(transform,hand,aim)?0:3;
 }
 void publishMask(unsigned slot,const sdk::InputCaptureV1& capture) {
  auto& s=state();for(unsigned hand=0;hand<2;++hand){s.masks[slot].buttons[hand]=capture.buttons[hand];s.masks[slot].chord[hand]=capture.chord[hand];}
@@ -116,6 +117,8 @@ void update() {
  if(!s.session.load())stage=1;
  else if(blockedMenu())stage=2;
  else {
+  std::array<std::array<float,3>,2> aim;
+  {std::scoped_lock lock(s.mutex);aim=s.aim;}
   auto* system=vr::VRSystem();const auto player=reinterpret_cast<std::uintptr_t>(RE::PlayerCharacter::GetSingleton());
   std::uint8_t leftHanded{};
   if(!system || !installPolling())stage=3;
@@ -127,7 +130,7 @@ void update() {
     const auto device=system->GetTrackedDeviceIndexForControllerRole(side?vr::TrackedControllerRole_RightHand:vr::TrackedControllerRole_LeftHand);s.devices[side]=device;
     vr::VRControllerState_t raw{};
     selfRead=true;const bool valid=device!=vr::k_unTrackedDeviceIndexInvalid && system->GetControllerState(device,&raw,sizeof(raw));selfRead=false;
-    const unsigned poseStage=valid?nativeHand(player,primary?0x6f0:0x768,hand):4;
+    const unsigned poseStage=valid?nativeHand(player,primary?0x6f0:0x768,hand,aim[side]):4;
     hand.valid=poseStage==0;hand.pressed=raw.ulButtonPressed;hand.stick[0]=raw.rAxis[0].x;hand.stick[1]=raw.rAxis[0].y;
     if(s.handStage[side]!=poseStage){s.handStage[side]=poseStage;log::info("UI native wand hand={} stage={} (0=ready, 1=node, 2=world read, 3=transform, 4=tracking)",side,poseStage);}
    }
@@ -158,6 +161,18 @@ std::uint64_t RPSUI_CALL subscribe(sdk::InputCallbackV1 callback,void* context) 
 bool RPSUI_CALL unsubscribe(std::uint64_t token) noexcept {
  auto& s=state();std::scoped_lock lock(s.mutex);
  for(unsigned i=0;i<maxClients;++i)if(s.clients[i].token==token && token){s.clients[i].closing=true;publishMask(i+1,{});if(!s.clients[i].gate->close())return false;s.clients[i]={};return true;}return false;
+}
+bool RPSUI_CALL setPointerAim(const sdk::PointerAimV1* value) noexcept {
+ if(!value || value->structSize!=sizeof(*value))return false;
+ std::array<std::array<float,3>,2> aim;
+ for(unsigned side=0;side<2;++side) {
+  const float pitch=value->pitchDegrees[side],yaw=value->yawDegrees[side];
+  if(!std::isfinite(pitch) || !std::isfinite(yaw) || std::fabs(pitch)>90 || std::fabs(yaw)>90)return false;
+  aim[side]=input_policy::pointerAimDirection(pitch,yaw);
+ }
+ auto& s=state();std::scoped_lock lock(s.mutex);s.aim=aim;
+ log::info("UI pointer aim degrees: left pitch={} yaw={}, right pitch={} yaw={}",value->pitchDegrees[0],value->yawDegrees[0],value->pitchDegrees[1],value->yawDegrees[1]);
+ return true;
 }
 bool RPSUI_CALL capture(std::uint64_t token,const sdk::InputCaptureV1* request) noexcept {
  if(!request || request->structSize!=sizeof(*request))return false;
@@ -197,5 +212,5 @@ bool captureHost(unsigned hand,bool active,bool configNavigation) noexcept {
 }
 }
 extern "C" __declspec(dllexport) const rpsui::sdk::InputApiV1* RPSUI_CALL RPSUI_RequestInputApi() noexcept {
- static const rpsui::sdk::InputApiV1 api{.subscribe=&rpsui::input::subscribe,.unsubscribe=&rpsui::input::unsubscribe,.capture=&rpsui::input::capture,.rawInputReadActive=&rpsui::input::rawInputReadActive,.capturedButtons=&rpsui::input::capturedButtons};return &api;
+ static const rpsui::sdk::InputApiV1 api{.subscribe=&rpsui::input::subscribe,.unsubscribe=&rpsui::input::unsubscribe,.capture=&rpsui::input::capture,.rawInputReadActive=&rpsui::input::rawInputReadActive,.capturedButtons=&rpsui::input::capturedButtons,.setPointerAim=&rpsui::input::setPointerAim};return &api;
 }

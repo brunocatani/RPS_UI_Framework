@@ -55,6 +55,14 @@ namespace
             }
         }
         rpsui::sdk::HandInputV1 hand;
+        transform.rotate = {{{1,0,0,0},{0,0,1,0},{0,-1,0,0}}};
+        require(rpsui::input_policy::nativeWandPose(transform, hand) && std::fabs(hand.forward[2]-1) < .001f,
+            "upward controller fixture does not reproduce the reported aim");
+        require(rpsui::input_policy::nativeWandPose(transform, hand, rpsui::input_policy::pointerAimDirection(-75,0)) &&
+            std::fabs(hand.forward[0]) < .001f && std::fabs(hand.forward[1]-.9659258f) < .001f && std::fabs(hand.forward[2]-.258819f) < .001f,
+            "downward pitch correction did not move upward controller aim toward forward");
+        require(rpsui::input_policy::nativeWandPose(transform, hand, rpsui::input_policy::pointerAimDirection(0,90)) &&
+            std::fabs(hand.forward[0]-1) < .001f, "positive yaw did not aim toward controller right");
         transform.scale = 0;
         require(!rpsui::input_policy::nativeWandPose(transform, hand), "zero-scale wand accepted");
         transform.scale = 1;
@@ -65,6 +73,8 @@ namespace
     void testApiContract()
     {
         using namespace rpsui::sdk;
+        static_assert(offsetof(InputApiV1, capturedButtons) == 40);
+        static_assert(offsetof(InputApiV1, setPointerAim) == 48);
         static_assert(sizeof(PanelRegistrationV1) == 248);
         static_assert(sizeof(PanelRenderFrameV1) == 144);
         static_assert(offsetof(PanelRenderFrameV1, backDown) == 106);
