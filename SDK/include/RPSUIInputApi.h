@@ -33,7 +33,9 @@ struct InputCaptureV1 {
 struct PointerAimV1 {
  std::uint32_t structSize{sizeof(PointerAimV1)};
  // Physical hands: left=0, right=1. Degrees relative to native controller
- // forward: positive pitch aims up, positive yaw aims right. Range [-90,90].
+ // forward: positive pitch aims up, positive yaw aims right.
+ // Pitch range [-180,180] permits consumer forward calibration plus adjustment;
+ // yaw range [-90,90].
  float pitchDegrees[2]{},yawDegrees[2]{};
 };
 struct InputApiV1 {

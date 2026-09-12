@@ -28,6 +28,10 @@ namespace
     void testNativeWandPointer()
     {
         using namespace rpsui::pointer_panel_intersection;
+        require(rpsui::input_policy::validPointerAim(-160,0) && rpsui::input_policy::validPointerAim(20,0),
+            "calibrated forward baseline cannot use the full pitch adjustment range");
+        require(!rpsui::input_policy::validPointerAim(-181,0) && !rpsui::input_policy::validPointerAim(0,91) &&
+            !rpsui::input_policy::validPointerAim(std::nanf(""),0), "invalid pointer calibration accepted");
         struct Transform {
             std::array<std::array<float, 4>, 3> rotate{};
             std::array<float, 3> translate{ -79000, 90000, 7950 };
@@ -63,6 +67,9 @@ namespace
             "downward pitch correction did not move upward controller aim toward forward");
         require(rpsui::input_policy::nativeWandPose(transform, hand, rpsui::input_policy::pointerAimDirection(0,90)) &&
             std::fabs(hand.forward[0]-1) < .001f, "positive yaw did not aim toward controller right");
+        require(rpsui::input_policy::nativeWandPose(transform, hand, rpsui::input_policy::pointerAimDirection(-160,0)) &&
+            std::fabs(hand.forward[1]-.3420201f) < .001f && std::fabs(hand.forward[2]+.9396926f) < .001f,
+            "calibrated downward aim was clipped at the native pitch limit");
         transform.scale = 0;
         require(!rpsui::input_policy::nativeWandPose(transform, hand), "zero-scale wand accepted");
         transform.scale = 1;

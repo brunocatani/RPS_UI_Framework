@@ -167,7 +167,7 @@ bool RPSUI_CALL setPointerAim(const sdk::PointerAimV1* value) noexcept {
  std::array<std::array<float,3>,2> aim;
  for(unsigned side=0;side<2;++side) {
   const float pitch=value->pitchDegrees[side],yaw=value->yawDegrees[side];
-  if(!std::isfinite(pitch) || !std::isfinite(yaw) || std::fabs(pitch)>90 || std::fabs(yaw)>90)return false;
+  if(!input_policy::validPointerAim(pitch,yaw))return false;
   aim[side]=input_policy::pointerAimDirection(pitch,yaw);
  }
  auto& s=state();std::scoped_lock lock(s.mutex);s.aim=aim;

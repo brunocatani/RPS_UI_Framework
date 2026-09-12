@@ -5,6 +5,9 @@
 #include <array>
 
 namespace rpsui::input_policy {
+inline bool validPointerAim(float pitchDegrees,float yawDegrees) noexcept {
+ return std::isfinite(pitchDegrees) && std::isfinite(yawDegrees) && std::fabs(pitchDegrees)<=180 && std::fabs(yawDegrees)<=90;
+}
 // NiTransform's contiguous vectors are local axes in world space. FO4VR's
 // compose helper (1401A8D60), called by NiAVObject world update (141C23740),
 // weights those vectors by local X/Y/Z. VR conversion at 141BAB210 maps
