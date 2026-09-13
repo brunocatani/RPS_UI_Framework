@@ -82,34 +82,60 @@ namespace rpsui::render::SceneDepthCapture
 
         template <std::size_t Size>
         [[nodiscard]] bool MatchesReadable(
+            const char* name,
             const void* address,
             const std::array<std::uint8_t, Size>& expected) noexcept
         {
-            if (!address) {
-                return false;
-            }
+            // Installation only: snapshot guarded bytes safely and report every
+            // failed boundary without dereferencing unreadable game memory.
             MEMORY_BASIC_INFORMATION memory{};
-            if (VirtualQuery(
-                    address,
-                    &memory,
-                    sizeof(memory)) != sizeof(memory) ||
-                memory.State != MEM_COMMIT ||
-                (memory.Protect &
-                 (PAGE_GUARD | PAGE_NOACCESS)) != 0) {
-                return false;
+            std::array<std::uint8_t, Size> actual{};
+            SIZE_T copied = 0;
+            DWORD error = ERROR_SUCCESS;
+            const char* reason = "null address";
+            const auto start = reinterpret_cast<std::uintptr_t>(address);
+            if (address) {
+                if (VirtualQuery(address, &memory, sizeof(memory)) != sizeof(memory)) {
+                    error = GetLastError();
+                    reason = "VirtualQuery failed";
+                } else if (memory.State != MEM_COMMIT ||
+                           (memory.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0) {
+                    reason = "memory unavailable";
+                } else {
+                    const auto regionStart = reinterpret_cast<std::uintptr_t>(memory.BaseAddress);
+                    if (start < regionStart || start - regionStart > memory.RegionSize ||
+                        memory.RegionSize - (start - regionStart) < Size) {
+                        reason = "guard crosses memory region";
+                    } else {
+                        const auto read = ReadProcessMemory(GetCurrentProcess(), address,
+                            actual.data(), actual.size(), &copied);
+                        error = read ? ERROR_SUCCESS : GetLastError();
+                        if (read && copied == Size && actual == expected) {
+                            return true;
+                        }
+                        reason = !read ? "ReadProcessMemory failed" :
+                            copied != Size ? "incomplete read" : "byte mismatch";
+                    }
+                }
             }
-            const auto start =
-                reinterpret_cast<std::uintptr_t>(address);
-            const auto end =
-                reinterpret_cast<std::uintptr_t>(
-                    memory.BaseAddress) +
-                memory.RegionSize;
-            return start <= end &&
-                   end - start >= expected.size() &&
-                   std::equal(
-                       expected.begin(),
-                       expected.end(),
-                       static_cast<const std::uint8_t*>(address));
+            const auto hex = [](const auto& bytes, std::size_t count) {
+                constexpr char digits[] = "0123456789ABCDEF";
+                std::array<char, Size * 3 + 1> text{};
+                for (std::size_t i = 0; i < count; ++i) {
+                    text[i * 3] = digits[bytes[i] >> 4];
+                    text[i * 3 + 1] = digits[bytes[i] & 0x0F];
+                    text[i * 3 + 2] = i + 1 < count ? ' ' : '\0';
+                }
+                return text;
+            };
+            const auto expectedText = hex(expected, Size);
+            const auto actualText = hex(actual, (std::min)(copied, actual.size()));
+            log::critical(
+                "RPS UI scene-depth guard '{}' failed: RVA=0x{:X}, reason={}, "
+                "expected=[{}], actual=[{}], read={}/{}, Win32 error={}, state=0x{:X}, protection=0x{:X}",
+                name, start - REL::Module::get().base(), reason, expectedText.data(),
+                copied ? actualText.data() : "unavailable", copied, Size, error, memory.State, memory.Protect);
+            return false;
         }
 
         [[nodiscard]] Microsoft::WRL::ComPtr<IUnknown>
@@ -145,28 +171,30 @@ namespace rpsui::render::SceneDepthCapture
         bool ValidateNativeSceneLayout() noexcept
         {
             const auto base = REL::Module::get().base();
-            const auto matches = [base](std::uintptr_t rva, const auto& bytes) {
-                return MatchesReadable(reinterpret_cast<const void*>(base + rva), bytes);
+            bool valid = true;
+            const auto matches = [base, &valid](const char* name, std::uintptr_t rva, const auto& bytes) {
+                if (!MatchesReadable(name, reinterpret_cast<const void*>(base + rva), bytes)) valid = false;
             };
             // Guard the exact map readers, scene-depth selector, data-array
             // extents and renderer-data root before any new native pointer walk.
-            return matches(0x1DBB4D0, std::array<std::uint8_t,11>{
-                0x48,0x63,0xC2,0x8B,0x84,0x81,0xBC,0x13,0x00,0x00,0xC3}) &&
-                matches(0x1DBB4F0, std::array<std::uint8_t,11>{
-                0x48,0x63,0xC2,0x8B,0x84,0x81,0xFC,0x15,0x00,0x00,0xC3}) &&
-                matches(0x1D947D0, std::array<std::uint8_t,5>{0x0F,0xB6,0x41,0x04,0xC3}) &&
-                matches(0x291B30F, std::array<std::uint8_t,52>{
+            matches("color target map", 0x1DBB4D0, std::array<std::uint8_t,11>{
+                0x48,0x63,0xC2,0x8B,0x84,0x81,0xBC,0x13,0x00,0x00,0xC3});
+            matches("depth target map", 0x1DBB4F0, std::array<std::uint8_t,11>{
+                0x48,0x63,0xC2,0x8B,0x84,0x81,0xFC,0x15,0x00,0x00,0xC3});
+            matches("scene depth selector", 0x1D947D0, std::array<std::uint8_t,5>{0x0F,0xB6,0x41,0x04,0xC3});
+            matches("scene depth slot", 0x291B30F, std::array<std::uint8_t,52>{
                 0x48,0x8D,0x0D,0x2A,0xE0,0x91,0x03,0xE8,0xB5,0x94,0x47,0xFF,0x41,0xB8,0x01,0x00,
                 0x00,0x00,0x48,0x8D,0x4D,0xC0,0x84,0xC0,0xB8,0x0C,0x00,0x00,0x00,0x89,0x74,0x24,
                 0x28,0x44,0x0F,0x45,0xC0,0x8D,0x50,0xFB,0x45,0x33,0xC9,0x89,0x74,0x24,0x20,0xE8,
-                0x7D,0x48,0x01,0x00}) &&
-                matches(0x1DA2A49, std::array<std::uint8_t,40>{
+                0x7D,0x48,0x01,0x00});
+            matches("target array extents", 0x1DA2A49, std::array<std::uint8_t,40>{
                 0x48,0x8D,0x8B,0x58,0x0A,0x00,0x00,0x33,0xD2,0x41,0xB8,0x30,0x1B,0x00,0x00,0xE8,
                 0xC9,0xEB,0xBE,0x00,0x48,0x8D,0x8B,0x88,0x25,0x00,0x00,0x33,0xD2,0x41,0xB8,0xB0,
-                0x0A,0x00,0x00,0xE8,0xB5,0xEB,0xBE,0x00}) &&
-                matches(0x2B23EE6, std::array<std::uint8_t,29>{
+                0x0A,0x00,0x00,0xE8,0xB5,0xEB,0xBE,0x00});
+            matches("renderer data root", 0x2B23EE6, std::array<std::uint8_t,29>{
                 0x48,0x8D,0x1D,0x63,0x54,0x71,0x03,0x48,0x8B,0xCB,0xE8,0xEB,0xEA,0x27,0xFF,0x48,
                 0x8B,0x05,0xCC,0x1B,0x71,0x03,0x48,0x89,0x1D,0xE5,0xFD,0x5C,0x03});
+            return valid;
         }
 
         void Count(CaptureStage stage) noexcept
@@ -483,15 +511,17 @@ namespace rpsui::render::SceneDepthCapture
                 REL::Offset(kCommitGraphicsStateRva)
             };
             g_callsite = callsite.address();
-            if (!MatchesReadable(
+            const bool targetMatches = MatchesReadable(
+                    "graphics state commit",
                     reinterpret_cast<const void*>(
                         target.address()),
-                    kCommitPrologue) ||
-                g_callsite < 4 ||
-                !MatchesReadable(
+                    kCommitPrologue);
+            const bool callsiteMatches = g_callsite >= 4 && MatchesReadable(
+                    "depth capture callsite",
                     reinterpret_cast<const void*>(
                         g_callsite - 4),
-                    kCallsiteBoundary)) {
+                    kCallsiteBoundary);
+            if (!targetMatches || !callsiteMatches) {
                 log::error(
                     "RPS UI Framework scene-depth callsite failed its FO4VR 1.2.72 byte guard");
                 g_callsite = 0;
