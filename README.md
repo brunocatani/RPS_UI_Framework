@@ -22,3 +22,7 @@ for setup, API reference, and integration guides.
 GNU General Public License version 3 or later (`GPL-3.0-or-later`).
 See [COPYRIGHT](COPYRIGHT) and [LICENSE](LICENSE).
 Required dependency notices are in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
+
+## Developer services
+
+The host exposes three independent V1 tables: eight panel calls, six input/capture/calibration calls, and four cooperation/directory/safe-retirement calls. Native controller input requires neither ROCK nor a skeleton provider. Consumers retain callback data until the appropriate safe unregister or input unsubscribe handshake succeeds.
