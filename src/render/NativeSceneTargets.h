@@ -13,7 +13,6 @@ namespace rpsui::render::native_scene_targets
     // binding 1D9B190. The CommonLib depth-array offset is not the VR offset.
     inline constexpr std::uintptr_t kRendererDataRva = 0x60F3CE8;
     inline constexpr std::uintptr_t kManagerRva = 0x38AC010;
-    inline constexpr std::uintptr_t kSceneSelectorRva = 0x6239344;
     inline constexpr std::uintptr_t kColorMapOffset = 0x13BC;
     inline constexpr std::uintptr_t kDepthMapOffset = 0x15FC;
     inline constexpr std::uintptr_t kColorArrayOffset = 0xA58;
@@ -36,14 +35,16 @@ namespace rpsui::render::native_scene_targets
         return value >= 0x10000 && value <= 0x00007FFFFFFEFFFF && value % alignof(void*) == 0;
     }
 
-    template <class Reader>
-    bool readDepth(std::uintptr_t base, Reader read, Snapshot& out) noexcept
+    template <class Reader, class Selector>
+    bool readDepth(std::uintptr_t base, Reader read, Selector select, Snapshot& out) noexcept
     {
         out = {};
         if (!read(base + kRendererDataRva, &out.rendererData, sizeof(out.rendererData)) || !plausible(out.rendererData)) return false;
         out.stage = "scene-selector";
         std::uint8_t alternate{};
-        if (!read(base + kSceneSelectorRva, &alternate, sizeof(alternate)) || alternate > 1) return false;
+        // The engine calls the selector. True Scopes replaces it with a
+        // thread-specific answer; reading renderer+4 would bypass that owner.
+        if (!select(alternate) || alternate > 1) return false;
         out.logicalDepth = alternate ? 12u : 1u;
         out.stage = "depth-slot";
         if (!read(base + kManagerRva + kDepthMapOffset + out.logicalDepth * 4, &out.depthIndex, sizeof(out.depthIndex)) ||

@@ -4,6 +4,7 @@
 
 #include "render/SceneDepthCapture.h"
 #include "render/NativeSceneTargets.h"
+#include "render/SceneDepthSelector.h"
 
 #include <array>
 
@@ -75,6 +76,9 @@ namespace rpsui::render::SceneDepthCapture
         std::atomic<const char*> g_nativeFailureStage{ "none" };
         std::uintptr_t g_callsite = 0;
         CommitGraphicsState g_original = nullptr;
+        using SceneSelector = std::uint8_t (*)(void*);
+        SceneSelector g_sceneSelector = nullptr;
+        bool g_trueScopesSelector = false;
         Capture g_capture;
         // Protected by g_captureMutex. Sampling reads state only; it never
         // changes depth selection or supplies a projection to the renderer.
@@ -168,6 +172,31 @@ namespace rpsui::render::SceneDepthCapture
                 destination, size, &copied) && copied == size;
         }
 
+        bool IsTrueScopesCode(std::uintptr_t address) noexcept
+        {
+            const auto module = GetModuleHandleW(L"truescopes_vr.dll");
+            HMODULE owner{};
+            MEMORY_BASIC_INFORMATION memory{};
+            return module && GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(address), &owner) &&
+                owner == module && VirtualQuery(reinterpret_cast<void*>(address), &memory, sizeof(memory)) == sizeof(memory) &&
+                memory.State == MEM_COMMIT && !(memory.Protect & (PAGE_GUARD | PAGE_NOACCESS)) &&
+                (memory.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY));
+        }
+
+        bool ReadSceneSelector(std::uint8_t& value) noexcept
+        {
+            if (!g_sceneSelector) return false;
+            // The selected code belongs to the game or a validated loaded
+            // plugin. Neither is unloaded during the framework's lifetime.
+            __try {
+                value = g_sceneSelector(reinterpret_cast<void*>(REL::Module::get().base() + scene_depth_selector::kRendererRva));
+                return scene_depth_selector::isMainView(g_trueScopesSelector, value);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+                return false;
+            }
+        }
+
         bool ValidateNativeSceneLayout() noexcept
         {
             const auto base = REL::Module::get().base();
@@ -181,7 +210,12 @@ namespace rpsui::render::SceneDepthCapture
                 0x48,0x63,0xC2,0x8B,0x84,0x81,0xBC,0x13,0x00,0x00,0xC3});
             matches("depth target map", 0x1DBB4F0, std::array<std::uint8_t,11>{
                 0x48,0x63,0xC2,0x8B,0x84,0x81,0xFC,0x15,0x00,0x00,0xC3});
-            matches("scene depth selector", 0x1D947D0, std::array<std::uint8_t,5>{0x0F,0xB6,0x41,0x04,0xC3});
+            const auto selector = scene_depth_selector::resolve(base + scene_depth_selector::kFunctionRva,
+                ReadNative, IsTrueScopesCode);
+            if (!selector.target) {
+                log::critical("RPS UI scene-depth selector rejected: stage={}; expected native reader or True Scopes-owned detour", selector.stage);
+                valid = false;
+            }
             matches("scene depth slot", 0x291B30F, std::array<std::uint8_t,52>{
                 0x48,0x8D,0x0D,0x2A,0xE0,0x91,0x03,0xE8,0xB5,0x94,0x47,0xFF,0x41,0xB8,0x01,0x00,
                 0x00,0x00,0x48,0x8D,0x4D,0xC0,0x84,0xC0,0xB8,0x0C,0x00,0x00,0x00,0x89,0x74,0x24,
@@ -194,6 +228,11 @@ namespace rpsui::render::SceneDepthCapture
             matches("renderer data root", 0x2B23EE6, std::array<std::uint8_t,29>{
                 0x48,0x8D,0x1D,0x63,0x54,0x71,0x03,0x48,0x8B,0xCB,0xE8,0xEB,0xEA,0x27,0xFF,0x48,
                 0x8B,0x05,0xCC,0x1B,0x71,0x03,0x48,0x89,0x1D,0xE5,0xFD,0x5C,0x03});
+            if (valid) {
+                g_sceneSelector = reinterpret_cast<SceneSelector>(selector.target);
+                g_trueScopesSelector = selector.trueScopes;
+                log::info("RPS UI scene-depth selector: {} target=0x{:X}; engine selector used for capture and submission", selector.stage, selector.target);
+            }
             return valid;
         }
 
@@ -359,7 +398,7 @@ namespace rpsui::render::SceneDepthCapture
             }
 
             native_scene_targets::Snapshot scene;
-            if (!native_scene_targets::readDepth(REL::Module::get().base(), ReadNative, scene)) {
+            if (!native_scene_targets::readDepth(REL::Module::get().base(), ReadNative, ReadSceneSelector, scene)) {
                 Count(CaptureStage::NativeTargetsUnavailable);
                 g_nativeFailureStage.store(scene.stage, std::memory_order_relaxed);
                 return;
@@ -615,7 +654,7 @@ namespace rpsui::render::SceneDepthCapture
 
         native_scene_targets::Snapshot scene;
         const auto base = REL::Module::get().base();
-        if (!native_scene_targets::readDepth(base, ReadNative, scene) ||
+        if (!native_scene_targets::readDepth(base, ReadNative, ReadSceneSelector, scene) ||
             !native_scene_targets::readColor(base, ReadNative, scene)) {
             result.failureReason = scene.stage;
             return result;
