@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 4.2)
 
 set(NAME "RPS_UI_Framework")
 set(FRIENDLY_NAME "RPS UI Framework")
-set(VERSION 0.1.0)
+set(VERSION 1.1.0)
 set(ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(SOURCE_DIR "${ROOT_DIR}/src")
 set(SDK_INCLUDE_DIR "${ROOT_DIR}/SDK/include")
