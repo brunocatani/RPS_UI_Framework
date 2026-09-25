@@ -4,6 +4,7 @@
 #include "Logger.h"
 #include "RPSUIFrameworkApi.h"
 #include "RPSUICooperationApi.h"
+#include "RPSUINumberOverlayApi.h"
 
 namespace
 {
@@ -137,6 +138,24 @@ namespace
         .unregisterPanelSafely = &unregisterPanelSafely,
         .unregisterConsumerSafely = &unregisterConsumerSafely,
     };
+
+    ResultV1 RPSUI_CALL registerNumberOverlay(std::uint64_t owner,
+        const NumberOverlayRegistrationV1* registration,std::uint64_t* handle) noexcept
+    {
+        if (!registration || !handle) return ResultV1::InvalidArgument;
+        return rpsui::FrameworkRuntime::get().registerNumberOverlay(owner,*registration,*handle);
+    }
+    ResultV1 RPSUI_CALL submitNumberOverlay(std::uint64_t owner,std::uint64_t handle,
+        const NumberOverlayPresentationV1* presentation) noexcept
+    {
+        if (!presentation) return ResultV1::InvalidArgument;
+        return rpsui::FrameworkRuntime::get().submitNumberOverlay(owner,handle,*presentation);
+    }
+    const NumberOverlayApiV1 g_numbers{
+        .registerOverlay=&registerNumberOverlay,
+        .submit=&submitNumberOverlay,
+        .unregisterOverlay=&unregisterPanel,
+    };
 }
 
 extern "C" DLLEXPORT const rpsui::sdk::ApiV1* RPSUI_CALL
@@ -151,4 +170,10 @@ extern "C" DLLEXPORT const rpsui::sdk::CooperationApiV1* RPSUI_CALL
 RPSUI_RequestCooperationApi(std::uint32_t requestedVersion) noexcept
 {
     return requestedVersion == rpsui::sdk::RPSUI_COOPERATION_VERSION ? &g_cooperation : nullptr;
+}
+
+extern "C" DLLEXPORT const rpsui::sdk::NumberOverlayApiV1* RPSUI_CALL
+RPSUI_RequestNumberOverlayApi(std::uint32_t requestedVersion) noexcept
+{
+    return requestedVersion==rpsui::sdk::RPSUI_NUMBER_OVERLAY_VERSION ? &g_numbers : nullptr;
 }

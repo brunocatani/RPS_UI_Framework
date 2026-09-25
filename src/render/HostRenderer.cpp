@@ -7,6 +7,7 @@
 #include "render/SceneDepthCapture.h"
 #include "render/StereoProjection.h"
 #include "render/WorldPanelDepth.h"
+#include "NumberOverlayLayout.h"
 
 #include <DirectXTK/CommonStates.h>
 #include <DirectXTK/Effects.h>
@@ -45,6 +46,8 @@ namespace rpsui::render
             std::unique_ptr<DirectX::PrimitiveBatch<Vertex>> batch;
             Microsoft::WRL::ComPtr<ID3D11InputLayout> inputLayout;
             Microsoft::WRL::ComPtr<ID3D11DepthStencilState> worldDepthState;
+            Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> digitAtlas;
+            bool digitAtlasFailed{};
             std::unordered_map<std::uint64_t, PanelGpu> panelGpu;
 
             bool initialized{ false };
@@ -76,6 +79,8 @@ namespace rpsui::render
             state.commonStates.reset();
             state.inputLayout.Reset();
             state.worldDepthState.Reset();
+            state.digitAtlas.Reset();
+            state.digitAtlasFailed=false;
             state.submittedRenderTarget.Reset();
             state.submittedTexture.Reset();
             state.isolatedContextState.Reset();
@@ -594,6 +599,92 @@ namespace rpsui::render
             }
         }
 
+        bool ensureDigitAtlas(Resources& state)
+        {
+            if (state.digitAtlas) return true;
+            if (state.digitAtlasFailed) return false;
+            state.digitAtlasFailed=true;
+            struct Canvas {
+                HDC dc{}; HBITMAP bitmap{}; HFONT font{}; HGDIOBJ oldBitmap{},oldFont{};
+                ~Canvas() {
+                    if (oldFont) SelectObject(dc,oldFont);
+                    if (oldBitmap) SelectObject(dc,oldBitmap);
+                    if (font) DeleteObject(font);
+                    if (bitmap) DeleteObject(bitmap);
+                    if (dc) DeleteDC(dc);
+                }
+            } canvas;
+            constexpr auto width=number_overlay::kGlyphWidth*number_overlay::kGlyphCount;
+            constexpr auto height=number_overlay::kGlyphHeight;
+            canvas.dc=CreateCompatibleDC(nullptr);
+            if (!canvas.dc) return false;
+            BITMAPINFO info{};
+            info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
+            info.bmiHeader.biWidth=width; info.bmiHeader.biHeight=-static_cast<LONG>(height);
+            info.bmiHeader.biPlanes=1; info.bmiHeader.biBitCount=32; info.bmiHeader.biCompression=BI_RGB;
+            void* pixels{};
+            canvas.bitmap=CreateDIBSection(canvas.dc,&info,DIB_RGB_COLORS,&pixels,nullptr,0);
+            canvas.font=CreateFontW(-144,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Segoe UI");
+            if (!canvas.bitmap || !canvas.font || !pixels) return false;
+            canvas.oldBitmap=SelectObject(canvas.dc,canvas.bitmap); canvas.oldFont=SelectObject(canvas.dc,canvas.font);
+            std::memset(pixels,0,width*height*4);
+            SetBkColor(canvas.dc,RGB(0,0,0)); SetTextColor(canvas.dc,RGB(255,255,255));
+            for (unsigned i=0;i<number_overlay::kGlyphCount;++i) {
+                const wchar_t digit=static_cast<wchar_t>(L'0'+i);
+                RECT rect{static_cast<LONG>(i*number_overlay::kGlyphWidth),0,
+                    static_cast<LONG>((i+1)*number_overlay::kGlyphWidth),static_cast<LONG>(height)};
+                if (!DrawTextW(canvas.dc,&digit,1,&rect,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX)) return false;
+            }
+            GdiFlush();
+            auto* bytes=static_cast<std::uint8_t*>(pixels);
+            for (unsigned i=0;i<width*height;++i) {
+                const auto coverage=static_cast<std::uint8_t>((unsigned(bytes[i*4])+bytes[i*4+1]+bytes[i*4+2])/3);
+                bytes[i*4]=bytes[i*4+1]=bytes[i*4+2]=bytes[i*4+3]=coverage;
+            }
+            D3D11_TEXTURE2D_DESC desc{};
+            desc.Width=width; desc.Height=height; desc.MipLevels=1; desc.ArraySize=1;
+            desc.Format=DXGI_FORMAT_R8G8B8A8_UNORM; desc.SampleDesc.Count=1;
+            desc.Usage=D3D11_USAGE_IMMUTABLE; desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+            D3D11_SUBRESOURCE_DATA data{pixels,width*4,0};
+            Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+            if (FAILED(state.device->CreateTexture2D(&desc,&data,&texture)) ||
+                FAILED(state.device->CreateShaderResourceView(texture.Get(),nullptr,&state.digitAtlas))) return false;
+            state.digitAtlasFailed=false;
+            return true;
+        }
+
+        bool renderNumberPanel(Resources& state,const RenderPanelSnapshot& panel)
+        {
+            const bool firstAttempt=!state.digitAtlasFailed;
+            if (!ensureDigitAtlas(state)) {
+                if (firstAttempt) log::error("Numeric overlay glyph atlas creation failed");
+                return false;
+            }
+            const auto layout=number_overlay::layout(panel.number,static_cast<float>(panel.pixelWidth),static_cast<float>(panel.pixelHeight));
+            state.context->SetPredication(nullptr,FALSE);
+            state.context->HSSetShader(nullptr,nullptr,0); state.context->DSSetShader(nullptr,nullptr,0); state.context->GSSetShader(nullptr,nullptr,0);
+            state.context->IASetInputLayout(state.inputLayout.Get());
+            state.context->OMSetBlendState(state.commonStates->AlphaBlend(),nullptr,0xFFFFFFFFu);
+            state.context->OMSetDepthStencilState(state.commonStates->DepthNone(),0);
+            state.context->RSSetState(state.commonStates->CullNone());
+            auto* sampler=state.commonStates->LinearClamp(); state.context->PSSetSamplers(0,1,&sampler);
+            state.effect->SetWorld(DirectX::XMMatrixIdentity()); state.effect->SetView(DirectX::XMMatrixIdentity());
+            state.effect->SetProjection(DirectX::XMMatrixOrthographicOffCenterRH(0,static_cast<float>(panel.pixelWidth),
+                static_cast<float>(panel.pixelHeight),0,0,1));
+            state.effect->SetTexture(state.digitAtlas.Get()); state.effect->Apply(state.context.Get());
+            const auto opacity=panel.numberOpacity;
+            const DirectX::XMFLOAT4 color{opacity,opacity,opacity,opacity};
+            state.batch->Begin();
+            for (std::size_t i=0;i<layout.count;++i) {
+                const auto& g=layout.glyphs[i];
+                state.batch->DrawQuad(Vertex{{g.left,g.top,0},color,{g.u0,0}},Vertex{{g.right,g.top,0},color,{g.u1,0}},
+                    Vertex{{g.right,g.bottom,0},color,{g.u1,1}},Vertex{{g.left,g.bottom,0},color,{g.u0,1}});
+            }
+            state.batch->End(); state.effect->SetTexture(nullptr);
+            return true;
+        }
+
         [[nodiscard]] bool renderConsumerPanel(
             Resources& state,
             const RenderPanelSnapshot& panel,
@@ -650,6 +741,7 @@ namespace rpsui::render
             frame.backDown = panel.backDown ? 1 : 0;
 
             try {
+                if (panel.numberOverlay) return renderNumberPanel(state,panel);
                 panel.renderCallback(&frame, panel.userData);
                 return true;
             } catch (...) {

@@ -9,6 +9,7 @@
 
 #include "RPSUIFrameworkApi.h"
 #include "RPSUIInputApi.h"
+#include "RPSUINumberOverlayApi.h"
 
 #include <array>
 #include <atomic>
@@ -31,6 +32,9 @@ namespace rpsui
         std::uint32_t pixelHeight{ 0 };
         std::int32_t sortOrder{ 0 };
         std::uint32_t flags{ 0 };
+        bool numberOverlay{};
+        std::uint32_t number{};
+        float numberOpacity{0.55f};
         rpsui::sdk::PanelPoseV1 pose{};
         rpsui::sdk::PhysicalHandV1 pointerHand{
             rpsui::sdk::PhysicalHandV1::None
@@ -114,6 +118,10 @@ namespace rpsui
         sdk::ResultV1 getCooperationSnapshot(sdk::CooperationSnapshotV1&) const noexcept;
         sdk::ResultV1 unregisterPanelSafely(std::uint64_t ownerToken, std::uint64_t panelHandle) noexcept;
         sdk::ResultV1 unregisterConsumerSafely(std::uint64_t ownerToken) noexcept;
+        sdk::ResultV1 registerNumberOverlay(std::uint64_t ownerToken,
+            const sdk::NumberOverlayRegistrationV1&,std::uint64_t& outHandle) noexcept;
+        sdk::ResultV1 submitNumberOverlay(std::uint64_t ownerToken,std::uint64_t handle,
+            const sdk::NumberOverlayPresentationV1&) noexcept;
 
         FrameworkRuntime(const FrameworkRuntime&) = delete;
         FrameworkRuntime& operator=(const FrameworkRuntime&) = delete;
@@ -161,6 +169,9 @@ namespace rpsui
             float maximumPhysicalWidth{ 0.0f };
             std::int32_t sortOrder{ 0 };
             std::uint32_t flags{ 0 };
+            bool numberOverlay{};
+            std::uint32_t number{};
+            float numberOpacity{0.55f};
             rpsui::sdk::PanelRenderCallbackV1 renderCallback{ nullptr };
             void* userData{ nullptr };
             std::shared_ptr<PanelCallbackGate> callbackGate;
@@ -215,7 +226,7 @@ namespace rpsui
 
         sdk::ResultV1 registerPanelImpl(std::uint64_t ownerToken,
             const sdk::PanelRegistrationV1&, std::uint64_t& outPanelHandle, bool cooperative,
-            sdk::PanelAgreementV1* agreement = nullptr) noexcept;
+            sdk::PanelAgreementV1* agreement = nullptr, bool numberOverlay = false) noexcept;
         sdk::ResultV1 unregisterPanelImpl(std::uint64_t ownerToken, std::uint64_t panelHandle, bool drain) noexcept;
         sdk::ResultV1 unregisterConsumerImpl(std::uint64_t ownerToken, bool drain) noexcept;
 
@@ -261,5 +272,6 @@ namespace rpsui
         double pointerTraceNextTime_{ 0 };
         ActiveResize activeResize_{};
         std::uint8_t suppressedHands_{ 0 };
+        bool numberInputReady_{};
     };
 }

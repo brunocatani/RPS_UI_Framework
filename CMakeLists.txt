@@ -82,7 +82,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
   F4VRCommon::framework
   Microsoft::DirectXTK
   spdlog::spdlog
-  d3d11.lib dxgi.lib d3dcompiler.lib shell32.lib version.lib bcrypt.lib)
+  d3d11.lib dxgi.lib d3dcompiler.lib shell32.lib version.lib bcrypt.lib gdi32.lib user32.lib)
 target_precompile_headers(${PROJECT_NAME} PRIVATE src/PCH.h)
 target_compile_options(${PROJECT_NAME} PRIVATE
   /sdl /utf-8 /Zi /permissive- /W4 /wd4715
@@ -125,6 +125,11 @@ option(RPS_UI_FRAMEWORK_BUILD_TESTS
   "Build deterministic framework contract tests." ON)
 if(RPS_UI_FRAMEWORK_BUILD_TESTS)
   enable_testing()
+  add_executable(RPSUINumberOverlayTests tests/NumberOverlayTests.cpp)
+  target_compile_features(RPSUINumberOverlayTests PRIVATE cxx_std_23)
+  target_compile_options(RPSUINumberOverlayTests PRIVATE /UNDEBUG)
+  target_include_directories(RPSUINumberOverlayTests PRIVATE "${SOURCE_DIR}" "${SDK_INCLUDE_DIR}")
+  add_test(NAME RPSUIFramework.NumberOverlay COMMAND RPSUINumberOverlayTests)
   add_executable(RPSUIPanelCooperationTests tests/PanelCooperationTests.cpp)
   target_compile_features(RPSUIPanelCooperationTests PRIVATE cxx_std_23)
   target_compile_definitions(RPSUIPanelCooperationTests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)

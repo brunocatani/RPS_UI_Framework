@@ -169,7 +169,7 @@ namespace rpsui
         std::scoped_lock lock(mutex_);
         RenderPanelBatch snapshots;
         for (const auto& panel : panels_) {
-            if (!panel.open || !panel.renderCallback) {
+            if (!panel.open || (!panel.renderCallback && !panel.numberOverlay) || (panel.numberOverlay && !numberInputReady_)) {
                 continue;
             }
             if (snapshots.count >= snapshots.panels.size()) {
@@ -184,6 +184,9 @@ namespace rpsui
                 .pixelHeight = panel.pixelHeight,
                 .sortOrder = panel.sortOrder,
                 .flags = panel.flags,
+                .numberOverlay = panel.numberOverlay,
+                .number = panel.number,
+                .numberOpacity = panel.numberOpacity,
                 .pose = panel.pose,
                 .pointerHand = panel.input.hand,
                 .hoveredResizeHandle = panel.input.hovered,
@@ -375,7 +378,7 @@ namespace rpsui
 
     sdk::ResultV1 FrameworkRuntime::registerPanelImpl(std::uint64_t ownerToken,
         const sdk::PanelRegistrationV1& registration, std::uint64_t& outPanelHandle, bool cooperative,
-        sdk::PanelAgreementV1* agreement) noexcept
+        sdk::PanelAgreementV1* agreement, bool numberOverlay) noexcept
     {
         try {
             outPanelHandle = 0;
@@ -410,7 +413,7 @@ namespace rpsui
                 !dimensionsValid ||
                 !widthsValid ||
                 (registration.flags & ~15u) != 0 ||
-                !registration.renderCallback) {
+                (!registration.renderCallback && !numberOverlay)) {
                 return rpsui::sdk::ResultV1::InvalidArgument;
             }
 
@@ -458,6 +461,7 @@ namespace rpsui
                 .maximumPhysicalWidth = registration.maximumPhysicalWidth,
                 .sortOrder = registration.sortOrder,
                 .flags = registration.flags,
+                .numberOverlay = numberOverlay,
                 .renderCallback = registration.renderCallback,
                 .userData = registration.userData,
                 .callbackGate = std::make_shared<PanelCallbackGate>(),
@@ -487,6 +491,46 @@ namespace rpsui
         const auto result = registerPanelImpl(ownerToken, registration.panel, agreement.panelHandle, true, &agreement);
         if (result == sdk::ResultV1::Ok) agreement.grantedAccess = sdk::RPSUI_PANEL_ACCESS;
         return result;
+    }
+
+    sdk::ResultV1 FrameworkRuntime::registerNumberOverlay(std::uint64_t owner,
+        const sdk::NumberOverlayRegistrationV1& registration,std::uint64_t& handle) noexcept
+    {
+        handle=0;
+        if (registration.structSize<sizeof(registration)) return sdk::ResultV1::InvalidArgument;
+        if (registration.apiVersion!=sdk::RPSUI_NUMBER_OVERLAY_VERSION) return sdk::ResultV1::VersionMismatch;
+        sdk::PanelRegistrationV1 panel;
+        std::memcpy(panel.panelId,registration.overlayId,sizeof(panel.panelId));
+        std::memcpy(panel.displayName,registration.displayName,sizeof(panel.displayName));
+        panel.pixelWidth=1024; panel.pixelHeight=480;
+        panel.defaultPhysicalWidth=3.0f; panel.minimumPhysicalWidth=0.1f; panel.maximumPhysicalWidth=100.0f;
+        panel.flags=static_cast<std::uint32_t>(sdk::PanelFlagV1::Transparent) | static_cast<std::uint32_t>(sdk::PanelFlagV1::FixedSize);
+        return registerPanelImpl(owner,panel,handle,false,nullptr,true);
+    }
+
+    sdk::ResultV1 FrameworkRuntime::submitNumberOverlay(std::uint64_t owner,std::uint64_t handle,
+        const sdk::NumberOverlayPresentationV1& presentation) noexcept
+    {
+        try {
+            if (presentation.structSize<sizeof(presentation)) return sdk::ResultV1::InvalidArgument;
+            if (presentation.apiVersion!=sdk::RPSUI_NUMBER_OVERLAY_VERSION) return sdk::ResultV1::VersionMismatch;
+            if (!std::isfinite(presentation.opacity) || presentation.opacity<0 || presentation.opacity>1) return sdk::ResultV1::InvalidArgument;
+            std::scoped_lock lock(mutex_);
+            auto* panel=findPanelLocked(handle);
+            if (!panel) return sdk::ResultV1::PanelNotRegistered;
+            if (panel->ownerToken!=owner) return sdk::ResultV1::OwnershipMismatch;
+            if (!panel->numberOverlay) return sdk::ResultV1::InvalidArgument;
+            if (panel->closing) return sdk::ResultV1::PanelClosing;
+            if (presentation.sequence && presentation.sequence<=panel->submittedSequence) return sdk::ResultV1::InvalidArgument;
+            if (presentation.open && !validatePose(presentation.pose,*panel)) return sdk::ResultV1::InvalidPose;
+            panel->open=presentation.open!=0;
+            if (panel->open) panel->pose=presentation.pose;
+            panel->number=presentation.value; panel->numberOpacity=presentation.opacity;
+            panel->submittedSequence=presentation.sequence ? presentation.sequence : panel->submittedSequence+1;
+            ++panel->stateSequence;
+            updateDepthRequestLocked();
+            return sdk::ResultV1::Ok;
+        } catch (...) { return sdk::ResultV1::InternalError; }
     }
 
     sdk::ResultV1 FrameworkRuntime::getCooperationSnapshot(sdk::CooperationSnapshotV1& out) const noexcept
@@ -624,8 +668,9 @@ namespace rpsui
 
     void FrameworkRuntime::separateNewPanelLocked(PanelRecord& panel) noexcept
     {
+        if (panel.numberOverlay) return;
         for (const auto& other : panels_) {
-            if (!other.open || other.panelHandle == panel.panelHandle) {
+            if (!other.open || other.numberOverlay || other.panelHandle == panel.panelHandle) {
                 continue;
             }
             if (panel_separation::haveInPlaneGap(panel.pose, other.pose)) {
@@ -849,7 +894,7 @@ namespace rpsui
             if (sample.rayValid) {
                 float nearest = (std::numeric_limits<float>::max)();
                 for (const auto& panel : panels_) {
-                    if (!panel.open) {
+                    if (!panel.open || panel.numberOverlay) {
                         continue;
                     }
                     pointer_panel_intersection::Hit hit{};
@@ -1153,6 +1198,7 @@ namespace rpsui
     {
         try {
             std::scoped_lock lock(mutex_);
+            numberInputReady_=snapshot.ready;
             if (!snapshot.ready) {
                 clearPointerStateLocked();
                 clearAllInputSuppressionLocked();
