@@ -1,4 +1,5 @@
 #include "PanelCooperation.h"
+#include "RPSUIPassivePanelApi.h"
 #include <iostream>
 #include <latch>
 #include <stdexcept>
@@ -8,6 +9,7 @@ static_assert(sizeof(rpsui::sdk::ApiV1) == 152);
 static_assert(offsetof(rpsui::sdk::ApiV1, isFrameworkReady) == 24);
 static_assert(offsetof(rpsui::sdk::ApiV1, reserved) == 88);
 static_assert(sizeof(rpsui::sdk::PanelRegistrationV1) == 248);
+static_assert(sizeof(rpsui::sdk::PassivePanelApiV1) == 24);
 
 namespace
 {

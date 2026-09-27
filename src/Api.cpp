@@ -5,6 +5,7 @@
 #include "RPSUIFrameworkApi.h"
 #include "RPSUICooperationApi.h"
 #include "RPSUINumberOverlayApi.h"
+#include "RPSUIPassivePanelApi.h"
 
 namespace
 {
@@ -151,6 +152,13 @@ namespace
         if (!presentation) return ResultV1::InvalidArgument;
         return rpsui::FrameworkRuntime::get().submitNumberOverlay(owner,handle,*presentation);
     }
+    ResultV1 RPSUI_CALL registerPassivePanel(std::uint64_t owner,
+        const PanelRegistrationV1* registration, std::uint64_t* handle) noexcept
+    {
+        if (!registration || !handle) return ResultV1::InvalidArgument;
+        return rpsui::FrameworkRuntime::get().registerPassivePanel(owner, *registration, *handle);
+    }
+    const PassivePanelApiV1 g_passive{.registerPanel = &registerPassivePanel};
     const NumberOverlayApiV1 g_numbers{
         .registerOverlay=&registerNumberOverlay,
         .submit=&submitNumberOverlay,
@@ -176,4 +184,9 @@ extern "C" DLLEXPORT const rpsui::sdk::NumberOverlayApiV1* RPSUI_CALL
 RPSUI_RequestNumberOverlayApi(std::uint32_t requestedVersion) noexcept
 {
     return requestedVersion==rpsui::sdk::RPSUI_NUMBER_OVERLAY_VERSION ? &g_numbers : nullptr;
+}
+extern "C" DLLEXPORT const rpsui::sdk::PassivePanelApiV1* RPSUI_CALL
+RPSUI_RequestPassivePanelApi(std::uint32_t requestedVersion) noexcept
+{
+    return requestedVersion == 1 ? &g_passive : nullptr;
 }

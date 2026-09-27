@@ -378,7 +378,7 @@ namespace rpsui
 
     sdk::ResultV1 FrameworkRuntime::registerPanelImpl(std::uint64_t ownerToken,
         const sdk::PanelRegistrationV1& registration, std::uint64_t& outPanelHandle, bool cooperative,
-        sdk::PanelAgreementV1* agreement, bool numberOverlay) noexcept
+        sdk::PanelAgreementV1* agreement, bool numberOverlay, bool passive) noexcept
     {
         try {
             outPanelHandle = 0;
@@ -462,6 +462,7 @@ namespace rpsui
                 .sortOrder = registration.sortOrder,
                 .flags = registration.flags,
                 .numberOverlay = numberOverlay,
+                .passive = passive || numberOverlay,
                 .renderCallback = registration.renderCallback,
                 .userData = registration.userData,
                 .callbackGate = std::make_shared<PanelCallbackGate>(),
@@ -491,6 +492,18 @@ namespace rpsui
         const auto result = registerPanelImpl(ownerToken, registration.panel, agreement.panelHandle, true, &agreement);
         if (result == sdk::ResultV1::Ok) agreement.grantedAccess = sdk::RPSUI_PANEL_ACCESS;
         return result;
+    }
+
+    sdk::ResultV1 FrameworkRuntime::registerPassivePanel(std::uint64_t owner,
+        const sdk::PanelRegistrationV1& registration, std::uint64_t& handle) noexcept
+    {
+        handle = 0;
+        if (registration.structSize < sizeof(registration)) return sdk::ResultV1::InvalidArgument;
+        if (registration.apiVersion != sdk::RPSUI_API_VERSION) return sdk::ResultV1::VersionMismatch;
+        constexpr auto required = static_cast<unsigned>(sdk::PanelFlagV1::Transparent) |
+            static_cast<unsigned>(sdk::PanelFlagV1::FixedSize);
+        if (registration.flags != required || !registration.renderCallback) return sdk::ResultV1::InvalidArgument;
+        return registerPanelImpl(owner, registration, handle, false, nullptr, false, true);
     }
 
     sdk::ResultV1 FrameworkRuntime::registerNumberOverlay(std::uint64_t owner,
@@ -668,9 +681,9 @@ namespace rpsui
 
     void FrameworkRuntime::separateNewPanelLocked(PanelRecord& panel) noexcept
     {
-        if (panel.numberOverlay) return;
+        if (panel.passive) return;
         for (const auto& other : panels_) {
-            if (!other.open || other.numberOverlay || other.panelHandle == panel.panelHandle) {
+            if (!other.open || other.passive || other.panelHandle == panel.panelHandle) {
                 continue;
             }
             if (panel_separation::haveInPlaneGap(panel.pose, other.pose)) {
@@ -894,7 +907,7 @@ namespace rpsui
             if (sample.rayValid) {
                 float nearest = (std::numeric_limits<float>::max)();
                 for (const auto& panel : panels_) {
-                    if (!panel.open || panel.numberOverlay) {
+                    if (!panel.open || panel.passive) {
                         continue;
                     }
                     pointer_panel_intersection::Hit hit{};
