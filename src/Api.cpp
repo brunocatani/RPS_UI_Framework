@@ -6,6 +6,7 @@
 #include "RPSUICooperationApi.h"
 #include "RPSUINumberOverlayApi.h"
 #include "RPSUIPassivePanelApi.h"
+#include "RPSUIRegistryApi.h"
 
 namespace
 {
@@ -140,6 +141,13 @@ namespace
         .unregisterConsumerSafely = &unregisterConsumerSafely,
     };
 
+    ResultV1 RPSUI_CALL getRegistryPage(const RegistryQueryV1* query, RegistryPageV1* page) noexcept
+    {
+        if (!query || !page) return ResultV1::InvalidArgument;
+        return rpsui::FrameworkRuntime::get().getRegistryPage(*query, *page);
+    }
+    const RegistryApiV1 g_registry{ .getPage = &getRegistryPage };
+
     ResultV1 RPSUI_CALL registerNumberOverlay(std::uint64_t owner,
         const NumberOverlayRegistrationV1* registration,std::uint64_t* handle) noexcept
     {
@@ -184,6 +192,11 @@ extern "C" DLLEXPORT const rpsui::sdk::NumberOverlayApiV1* RPSUI_CALL
 RPSUI_RequestNumberOverlayApi(std::uint32_t requestedVersion) noexcept
 {
     return requestedVersion==rpsui::sdk::RPSUI_NUMBER_OVERLAY_VERSION ? &g_numbers : nullptr;
+}
+extern "C" DLLEXPORT const rpsui::sdk::RegistryApiV1* RPSUI_CALL
+RPSUI_RequestRegistryApi(std::uint32_t requestedVersion) noexcept
+{
+    return requestedVersion == rpsui::sdk::RPSUI_REGISTRY_VERSION ? &g_registry : nullptr;
 }
 extern "C" DLLEXPORT const rpsui::sdk::PassivePanelApiV1* RPSUI_CALL
 RPSUI_RequestPassivePanelApi(std::uint32_t requestedVersion) noexcept

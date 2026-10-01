@@ -69,7 +69,7 @@ foreach ($token in @(
 }
 
 foreach ($token in @(
-    'snapshotRenderPanels()',
+    'snapshotRenderPanels(',
     'PanelRenderFrameV1',
     'renderConsumerPanel(',
     'drawWorldPanel(',

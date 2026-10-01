@@ -6,6 +6,8 @@
 #include "PointerHandSelection.h"
 #include "PointerPanelIntersection.h"
 #include "PanelCooperation.h"
+#include "RegistryCapacity.h"
+#include "RPSUIRegistryApi.h"
 
 #include "RPSUIFrameworkApi.h"
 #include "RPSUIInputApi.h"
@@ -57,8 +59,15 @@ namespace rpsui
 
     struct RenderPanelBatch
     {
-        std::array<RenderPanelSnapshot, rpsui::sdk::RPSUI_MAX_PANELS> panels{};
+        // Owned by the renderer and reused: never zero 1024 slots on every frame.
+        std::array<RenderPanelSnapshot, kPanelCapacity> panels{};
         std::size_t count{ 0 };
+
+        void clear() noexcept
+        {
+            for (std::size_t i = 0; i < count; ++i) panels[i].callbackGate.reset();
+            count = 0;
+        }
 
         [[nodiscard]] bool empty() const noexcept
         {
@@ -87,7 +96,7 @@ namespace rpsui
         void setHookStatus(sdk::HookStatusV1 status) noexcept;
         [[nodiscard]] bool isReady() const noexcept;
         [[nodiscard]] bool hasOpenPanels() const noexcept;
-        [[nodiscard]] RenderPanelBatch snapshotRenderPanels() const noexcept;
+        void snapshotRenderPanels(RenderPanelBatch& out) const noexcept;
 
         [[nodiscard]] rpsui::sdk::ResultV1 registerConsumer(
             const rpsui::sdk::ConsumerRegistrationV1& registration,
@@ -116,6 +125,7 @@ namespace rpsui
         sdk::ResultV1 registerCooperativePanel(std::uint64_t ownerToken,
             const sdk::CooperativePanelRegistrationV1&, sdk::PanelAgreementV1&) noexcept;
         sdk::ResultV1 getCooperationSnapshot(sdk::CooperationSnapshotV1&) const noexcept;
+        sdk::ResultV1 getRegistryPage(const sdk::RegistryQueryV1&, sdk::RegistryPageV1&) const noexcept;
         sdk::ResultV1 unregisterPanelSafely(std::uint64_t ownerToken, std::uint64_t panelHandle) noexcept;
         sdk::ResultV1 unregisterConsumerSafely(std::uint64_t ownerToken) noexcept;
         sdk::ResultV1 registerNumberOverlay(std::uint64_t ownerToken,
@@ -223,7 +233,7 @@ namespace rpsui
             rpsui::sdk::PanelPoseV1 initialPose{};
         };
 
-        FrameworkRuntime() = default;
+        FrameworkRuntime();
         ~FrameworkRuntime() = default;
 
         sdk::ResultV1 registerPanelImpl(std::uint64_t ownerToken,
@@ -246,6 +256,8 @@ namespace rpsui
             const PanelRecord& panel) const noexcept;
         void separateNewPanelLocked(PanelRecord& panel) noexcept;
         void updateDepthRequestLocked() const noexcept;
+        void setPanelOpenLocked(PanelRecord& panel, bool open) noexcept;
+        void rebuildOpenPanelsLocked() noexcept;
         void updatePointerLocked(
             const sdk::InputFrameV1& snapshot) noexcept;
         [[nodiscard]] bool requestInputSuppressionLocked(
@@ -259,6 +271,10 @@ namespace rpsui
         mutable std::mutex mutex_;
         std::vector<ConsumerRecord> consumers_;
         std::vector<PanelRecord> panels_;
+        // Sorted registry indices. Only open panels participate in per-frame work.
+        // Capacity is reserved once; removals rebuild indices before releasing mutex_.
+        std::vector<std::size_t> openPanels_;
+        std::uint64_t registryRevision_{ 1 };
         std::uint64_t nextOwnerToken_{ 1 };
         std::uint64_t nextPanelHandle_{ 1 };
         std::atomic_bool started_{ false };

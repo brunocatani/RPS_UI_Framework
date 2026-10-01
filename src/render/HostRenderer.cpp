@@ -49,6 +49,7 @@ namespace rpsui::render
             Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> digitAtlas;
             bool digitAtlasFailed{};
             std::unordered_map<std::uint64_t, PanelGpu> panelGpu;
+            RenderPanelBatch panels;
 
             bool initialized{ false };
             bool initializationFailed{ false };
@@ -758,18 +759,18 @@ namespace rpsui::render
         if (!texture) {
             return;
         }
-        auto panels =
-            FrameworkRuntime::get().snapshotRenderPanels();
-        if (panels.empty()) {
-            return;
-        }
-
         auto& state = resources();
         std::unique_lock renderLock(
             state.renderMutex,
             std::try_to_lock);
-        if (!renderLock.owns_lock() ||
-            !initialize(state, texture)) {
+        if (!renderLock.owns_lock()) return;
+        auto& panels = state.panels;
+        FrameworkRuntime::get().snapshotRenderPanels(panels);
+        if (panels.empty()) {
+            state.panelGpu.clear();
+            return;
+        }
+        if (!initialize(state, texture)) {
             return;
         }
 
@@ -851,6 +852,7 @@ namespace rpsui::render
     {
         auto& state = resources();
         std::scoped_lock lock(state.renderMutex);
+        state.panels.clear();
         releaseDeviceResources(state);
         SceneDepthCapture::Reset();
     }

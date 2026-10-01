@@ -6,11 +6,12 @@
 #include "PanelCooperation.h"
 #include "Logger.h"
 #include "vrcf/VRControllersManager.h"
+#include <bit>
 
 namespace rpsui::input {
 namespace {
 constexpr std::uint64_t trigger=1ull<<33,grip=1ull<<2,accept=1ull<<7;
-constexpr unsigned maxClients=16;
+constexpr unsigned maxClients=static_cast<unsigned>(kInputSubscriberCapacity);
 struct Client {
  std::uint64_t token{};sdk::InputCallbackV1 callback{};void* context{};
  std::shared_ptr<PanelCallbackGate> gate;
@@ -23,6 +24,11 @@ struct State {
  std::mutex mutex;std::array<Client,maxClients> clients;
  std::uint64_t nextToken{1};
  std::array<PollCapture,maxClients+1> masks;
+ // Published by existing capture writers, read by arbitrary OpenVR poll threads.
+ // Empty slots never incur per-slot atomic loads in capturedButtons.
+ std::array<std::atomic_uint64_t,(maxClients+1+63)/64> activeMasks{};
+ std::vector<unsigned> liveClients; // Protected by mutex; slots stay stable.
+ std::vector<Client> callbacks; // Reused exclusively by the existing game tick.
  sdk::InputFrameV1 frame;
  std::array<std::array<float,3>,2> aim{{{0,1,0},{0,1,0}}};
  std::atomic_bool installed{},session{},allowPollCapture{};
@@ -31,6 +37,7 @@ struct State {
  bool hostCapture[2]{},hostConfig[2]{};
  unsigned failureStage{};
  unsigned handStage[2]{};
+ State(){liveClients.reserve(maxClients);callbacks.reserve(maxClients);}
 };
 State& state(){static State s;return s;}
 thread_local bool selfRead=false;
@@ -61,8 +68,14 @@ bool RPSUI_CALL rawInputReadActive() noexcept {return selfRead;}
 std::uint64_t RPSUI_CALL capturedButtons(unsigned side,std::uint64_t leftPressed,std::uint64_t rightPressed) noexcept {
  auto& s=state();if(side>=2 || !s.allowPollCapture.load())return 0;
  std::uint64_t mask=0;
- for(const auto& entry:s.masks)
-  mask|=input_policy::capturedMask(side,entry.buttons[side].load(),entry.chord[0].load(),entry.chord[1].load(),leftPressed,rightPressed);
+ for(unsigned word=0;word<s.activeMasks.size();++word) {
+  auto bits=s.activeMasks[word].load(std::memory_order_acquire);
+  while(bits) {
+   const auto slot=word*64+std::countr_zero(bits);bits&=bits-1;
+   const auto& entry=s.masks[slot];
+   mask|=input_policy::capturedMask(side,entry.buttons[side].load(),entry.chord[0].load(),entry.chord[1].load(),leftPressed,rightPressed);
+  }
+ }
  return mask;
 }
 void filter(vr::TrackedDeviceIndex_t device,vr::VRControllerState_t* sample) noexcept {
@@ -109,6 +122,10 @@ unsigned nativeHand(std::uintptr_t player,std::uintptr_t offset,sdk::HandInputV1
 }
 void publishMask(unsigned slot,const sdk::InputCaptureV1& capture) {
  auto& s=state();for(unsigned hand=0;hand<2;++hand){s.masks[slot].buttons[hand]=capture.buttons[hand];s.masks[slot].chord[hand]=capture.chord[hand];}
+ const auto bit=std::uint64_t{1}<<(slot%64);
+ if(capture.buttons[0] || capture.buttons[1] || capture.chord[0] || capture.chord[1])
+  s.activeMasks[slot/64].fetch_or(bit,std::memory_order_release);
+ else s.activeMasks[slot/64].fetch_and(~bit,std::memory_order_release);
 }
 void update() {
  auto& s=state();++s.frame.sequence;s.frame.seconds=std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -141,13 +158,14 @@ void update() {
  if(stage!=s.failureStage){s.failureStage=stage;log::info("UI input availability stage={} (0=ready, 1=session, 2=menu, 3=OpenVR, 4=player, 5=wand)",stage);}
  s.allowPollCapture=s.frame.ready;
  FrameworkRuntime::get().handleInputFrame(s.frame);
- std::array<Client,maxClients> callbacks;
- {std::scoped_lock lock(s.mutex);callbacks=s.clients;}
- for(const auto& client:callbacks)if(client.token){PanelCallbackScope scope(client.gate);if(scope)client.callback(&s.frame,client.context);}
- {std::scoped_lock lock(s.mutex);for(unsigned i=0;i<maxClients;++i)if(!s.frame.ready || s.frame.sequence-s.clients[i].renewed>3)publishMask(i+1,{});}
+ s.callbacks.clear();
+ {std::scoped_lock lock(s.mutex);for(const auto i:s.liveClients)s.callbacks.push_back(s.clients[i]);}
+ for(const auto& client:s.callbacks){PanelCallbackScope scope(client.gate);if(scope)client.callback(&s.frame,client.context);}
+ s.callbacks.clear();
+ {std::scoped_lock lock(s.mutex);for(const auto i:s.liveClients)if(!s.frame.ready || s.frame.sequence-s.clients[i].renewed>3)publishMask(i+1,{});}
 }
 void safeUpdate() noexcept {
- try{update();}catch(...){auto& s=state();s.allowPollCapture=false;s.frame.ready=false;for(unsigned i=0;i<=maxClients;++i)publishMask(i,{});static bool logged=false;if(!logged){logged=true;log::error("UI input frame failed; capture released");}}
+ try{update();}catch(...){auto& s=state();s.callbacks.clear();s.allowPollCapture=false;s.frame.ready=false;for(unsigned i=0;i<=maxClients;++i)publishMask(i,{});static bool logged=false;if(!logged){logged=true;log::error("UI input frame failed; capture released");}}
 }
 void tick(std::uint64_t argument) {
  originalTick(argument);
@@ -155,12 +173,12 @@ void tick(std::uint64_t argument) {
 }
 std::uint64_t RPSUI_CALL subscribe(sdk::InputCallbackV1 callback,void* context) noexcept {
  try{if(!callback)return 0;auto& s=state();std::scoped_lock lock(s.mutex);
-  for(auto& client:s.clients)if(!client.token && s.nextToken!=UINT64_MAX){Client value;value.gate=std::make_shared<PanelCallbackGate>();value.token=s.nextToken++;value.callback=callback;value.context=context;client=std::move(value);return client.token;}
+  for(unsigned i=0;i<maxClients;++i){auto& client=s.clients[i];if(!client.token && s.nextToken!=UINT64_MAX){Client value;value.gate=std::make_shared<PanelCallbackGate>();value.token=s.nextToken++;value.callback=callback;value.context=context;client=std::move(value);s.liveClients.insert(std::lower_bound(s.liveClients.begin(),s.liveClients.end(),i),i);return client.token;}}
  }catch(...){log::error("UI input subscription failed");}return 0;
 }
 bool RPSUI_CALL unsubscribe(std::uint64_t token) noexcept {
  auto& s=state();std::scoped_lock lock(s.mutex);
- for(unsigned i=0;i<maxClients;++i)if(s.clients[i].token==token && token){s.clients[i].closing=true;publishMask(i+1,{});if(!s.clients[i].gate->close())return false;s.clients[i]={};return true;}return false;
+ for(unsigned i=0;i<maxClients;++i)if(s.clients[i].token==token && token){s.clients[i].closing=true;publishMask(i+1,{});if(!s.clients[i].gate->close())return false;s.clients[i]={};std::erase(s.liveClients,i);return true;}return false;
 }
 bool RPSUI_CALL setPointerAim(const sdk::PointerAimV1* value) noexcept {
  if(!value || value->structSize!=sizeof(*value))return false;

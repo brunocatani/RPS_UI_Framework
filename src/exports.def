@@ -6,3 +6,4 @@ EXPORTS
     RPSUI_RequestCooperationApi
     RPSUI_RequestInputApi
     RPSUI_RequestNumberOverlayApi
+    RPSUI_RequestRegistryApi

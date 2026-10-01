@@ -125,6 +125,18 @@ option(RPS_UI_FRAMEWORK_BUILD_TESTS
   "Build deterministic framework contract tests." ON)
 if(RPS_UI_FRAMEWORK_BUILD_TESTS)
   enable_testing()
+  # Exercise actual exported tables, registries and input subscriptions. The
+  # test never installs native hooks; scene-depth demand is stubbed.
+  add_executable(RPSUIRegistryTests tests/RegistryTests.cpp src/FrameworkRuntime.cpp src/Api.cpp)
+  target_compile_features(RPSUIRegistryTests PRIVATE cxx_std_23)
+  target_compile_definitions(RPSUIRegistryTests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX NOMMNOSOUND)
+  target_include_directories(RPSUIRegistryTests PRIVATE "${SOURCE_DIR}" "${SDK_INCLUDE_DIR}")
+  target_link_libraries(RPSUIRegistryTests PRIVATE F4VRCommon::framework spdlog::spdlog)
+  # No test calls OpenVR; defer its import so validation needs no game DLLs.
+  target_link_libraries(RPSUIRegistryTests PRIVATE delayimp)
+  target_link_options(RPSUIRegistryTests PRIVATE /DELAYLOAD:openvr_api.dll)
+  target_precompile_headers(RPSUIRegistryTests PRIVATE src/PCH.h)
+  add_test(NAME RPSUIFramework.Registry COMMAND RPSUIRegistryTests)
   add_executable(RPSUINumberOverlayTests tests/NumberOverlayTests.cpp)
   target_compile_features(RPSUINumberOverlayTests PRIVATE cxx_std_23)
   target_compile_options(RPSUINumberOverlayTests PRIVATE /UNDEBUG)
