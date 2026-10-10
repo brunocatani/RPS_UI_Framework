@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 4.2)
 
 set(NAME "RPS_UI_Framework")
 set(FRIENDLY_NAME "RPS UI Framework")
-set(VERSION 1.1.0)
+set(VERSION 1.1.1)
 set(ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(SOURCE_DIR "${ROOT_DIR}/src")
 set(SDK_INCLUDE_DIR "${ROOT_DIR}/SDK/include")
@@ -125,6 +125,11 @@ option(RPS_UI_FRAMEWORK_BUILD_TESTS
   "Build deterministic framework contract tests." ON)
 if(RPS_UI_FRAMEWORK_BUILD_TESTS)
   enable_testing()
+  add_executable(RPSUIGraphicsStateCommitTests tests/GraphicsStateCommitTests.cpp)
+  target_compile_features(RPSUIGraphicsStateCommitTests PRIVATE cxx_std_23)
+  target_compile_definitions(RPSUIGraphicsStateCommitTests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+  target_include_directories(RPSUIGraphicsStateCommitTests PRIVATE "${SOURCE_DIR}")
+  add_test(NAME RPSUIFramework.GraphicsStateCommit COMMAND RPSUIGraphicsStateCommitTests)
   # Exercise actual exported tables, registries and input subscriptions. The
   # test never installs native hooks; scene-depth demand is stubbed.
   add_executable(RPSUIRegistryTests tests/RegistryTests.cpp src/FrameworkRuntime.cpp src/Api.cpp)

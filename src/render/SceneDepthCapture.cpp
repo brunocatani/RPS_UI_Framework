@@ -5,6 +5,7 @@
 #include "render/SceneDepthCapture.h"
 #include "render/NativeSceneTargets.h"
 #include "render/SceneDepthSelector.h"
+#include "render/GraphicsStateCommit.h"
 
 #include <array>
 
@@ -20,13 +21,6 @@ namespace rpsui::render::SceneDepthCapture
         constexpr std::array<std::uint8_t, 5>
             kOriginalCall{
                 0xE8, 0x81, 0xCD, 0x00, 0x00
-            };
-        constexpr std::array<std::uint8_t, 19>
-            kCommitPrologue{
-                0x88, 0x54, 0x24, 0x10,
-                0x88, 0x4C, 0x24, 0x08,
-                0x55, 0x56, 0x57, 0x41, 0x56, 0x41, 0x57,
-                0x48, 0x83, 0xEC, 0x50
             };
         constexpr std::array<std::uint8_t, 13>
             kCallsiteBoundary{
@@ -182,6 +176,16 @@ namespace rpsui::render::SceneDepthCapture
                 owner == module && VirtualQuery(reinterpret_cast<void*>(address), &memory, sizeof(memory)) == sizeof(memory) &&
                 memory.State == MEM_COMMIT && !(memory.Protect & (PAGE_GUARD | PAGE_NOACCESS)) &&
                 (memory.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY));
+        }
+
+        bool IsExecutable(std::uintptr_t address) noexcept
+        {
+            MEMORY_BASIC_INFORMATION memory{};
+            if (VirtualQuery(reinterpret_cast<const void*>(address), &memory, sizeof(memory)) != sizeof(memory) ||
+                memory.State != MEM_COMMIT || (memory.Protect & (PAGE_GUARD | PAGE_NOACCESS))) return false;
+            const auto protection = memory.Protect & 0xFF;
+            return protection == PAGE_EXECUTE || protection == PAGE_EXECUTE_READ ||
+                protection == PAGE_EXECUTE_READWRITE || protection == PAGE_EXECUTE_WRITECOPY;
         }
 
         bool ReadSceneSelector(std::uint8_t& value) noexcept
@@ -550,11 +554,17 @@ namespace rpsui::render::SceneDepthCapture
                 REL::Offset(kCommitGraphicsStateRva)
             };
             g_callsite = callsite.address();
-            const bool targetMatches = MatchesReadable(
-                    "graphics state commit",
-                    reinterpret_cast<const void*>(
-                        target.address()),
-                    kCommitPrologue);
+            const auto commitEntry = graphics_state_commit::inspect(target.address(), ReadNative, IsExecutable);
+            const bool targetMatches = commitEntry.valid;
+            if (!targetMatches) {
+                (void)MatchesReadable("graphics state commit", reinterpret_cast<const void*>(target.address()),
+                    graphics_state_commit::nativePrologue);
+                log::error("RPS UI graphics state commit is not a supported executable native call at RVA=0x{:X}",
+                    kCommitGraphicsStateRva);
+            } else if (commitEntry.detour) {
+                log::info("RPS UI graphics state commit compatibility: preserving E9 detour at RVA=0x{:X} -> 0x{:X}; native tail verified",
+                    kCommitGraphicsStateRva, commitEntry.detour);
+            }
             const bool callsiteMatches = g_callsite >= 4 && MatchesReadable(
                     "depth capture callsite",
                     reinterpret_cast<const void*>(
