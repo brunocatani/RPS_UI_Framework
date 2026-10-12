@@ -1,6 +1,7 @@
 #include "PCH.h"
 #include "FrameworkRuntime.h"
 #include "RPSUIPassivePanelApi.h"
+#include "RPSUIFocusedPanelApi.h"
 // Compile the real input service here so the test can exercise poll publication
 // and game-tick dispatch without installing hooks or reading native game state.
 #include "InputService.cpp"
@@ -24,6 +25,7 @@ extern "C" const RegistryApiV1* RPSUI_CALL RPSUI_RequestRegistryApi(std::uint32_
 extern "C" const PassivePanelApiV1* RPSUI_CALL RPSUI_RequestPassivePanelApi(std::uint32_t) noexcept;
 extern "C" const NumberOverlayApiV1* RPSUI_CALL RPSUI_RequestNumberOverlayApi(std::uint32_t) noexcept;
 extern "C" const InputApiV1* RPSUI_CALL RPSUI_RequestInputApi() noexcept;
+extern "C" const FocusedPanelApiV1* RPSUI_CALL RPSUI_RequestFocusedPanelApi(std::uint32_t, std::uint32_t) noexcept;
 namespace rpsui::render::SceneDepthCapture {
     bool requested{};
     void SetCaptureRequested(bool value) noexcept { requested = value; }
@@ -55,6 +57,96 @@ namespace {
         value.renderCallback = &render;
         value.sortOrder = -static_cast<int>(id);
         return value;
+    }
+
+    void testFocusedPanels()
+    {
+        const auto* focused = RPSUI_RequestFocusedPanelApi(1,0);
+        const auto* api = RPSUI_RequestApi(1);
+        const auto* coop = RPSUI_RequestCooperationApi(1);
+        const auto* input = RPSUI_RequestInputApi();
+        require(focused && focused->major==1 && focused->minor==0 && focused->structSize==24,
+            "focused service negotiation failed");
+        require(!RPSUI_RequestFocusedPanelApi(0,0) && !RPSUI_RequestFocusedPanelApi(2,0) &&
+            !RPSUI_RequestFocusedPanelApi(1,1), "focused service accepted unsupported version");
+        ConsumerRegistrationV1 consumer;
+        std::strcpy(consumer.consumerId,"focused-test"); std::strcpy(consumer.displayName,"Focused test");
+        ConsumerHandleV1 owner;
+        require(api->registerConsumer(&consumer,&owner)==ResultV1::Ok,"focused owner failed");
+        auto reg=registration(2000);
+        std::uint64_t a{},b{};
+        require(focused->registerPanel(owner.ownerToken,nullptr,&a)==ResultV1::InvalidArgument,
+            "focused null registration accepted");
+        reg.flags=0;
+        require(focused->registerPanel(owner.ownerToken,&reg,&a)==ResultV1::InvalidArgument,
+            "focused resizable panel accepted");
+        reg.flags=unsigned(PanelFlagV1::FixedSize)|unsigned(PanelFlagV1::Transparent);
+        reg.defaultPhysicalWidth=80; reg.minimumPhysicalWidth=80; reg.maximumPhysicalWidth=80;
+        require(focused->registerPanel(owner.ownerToken,&reg,&a)==ResultV1::Ok,"focused A failed");
+        std::strcpy(reg.panelId,"focused-B");
+        require(focused->registerPanel(owner.ownerToken,&reg,&b)==ResultV1::Ok,"focused B failed");
+        const auto present=[&](std::uint64_t handle,float x) {
+            PanelPresentationV1 p; p.open=1; p.pose.center[0]=x;
+            p.pose.physicalWidth=80; p.pose.physicalHeight=50;
+            require(api->submitPanelPresentation(owner.ownerToken,handle,&p)==ResultV1::Ok,"focused pose failed");
+            PanelStateV1 state;
+            require(api->getPanelState(owner.ownerToken,handle,&state)==ResultV1::Ok && state.pose.center[0]==x,
+                "focused panel moved from its anchor");
+        };
+        present(a,-100); present(b,100);
+        auto& runtime=rpsui::FrameworkRuntime::get();
+        auto& inputState=rpsui::input::state();
+        InputFrameV1 frame; frame.ready=true; frame.sequence=100000;
+        for(unsigned side=0;side<2;++side) {
+            frame.hands[side].valid=true;
+            frame.hands[side].position[0]=side?100.f:-100.f;
+            frame.hands[side].position[1]=-100;
+            frame.hands[side].forward[1]=1;
+        }
+        const auto tick=[&] { ++frame.sequence; inputState.frame=frame; inputState.allowPollCapture=true;
+            runtime.handleInputFrame(frame); };
+        const auto get=[&](std::uint64_t handle) {
+            PanelStateV1 state;
+            require(api->getPanelState(owner.ownerToken,handle,&state)==ResultV1::Ok,"focused state missing");
+            return state;
+        };
+        // An invalid frame resets prior legacy test focus without accessing game state.
+        runtime.handleInputFrame({}); tick(); tick();
+        require(!get(a).pointerValid && get(b).pointerValid,"two focused cursors were routed");
+        require(input->capturedButtons(0,0,0)==0 && (input->capturedButtons(1,0,0)&(1ull<<32)),
+            "unselected hand captured locomotion");
+        frame.hands[1].pressed=1ull<<33; tick();
+        require(get(b).primaryDown,"focused neutral-to-click transition missing");
+        frame.hands[1].forward[0]=1; frame.hands[1].forward[1]=0; tick();
+        require(!get(b).pointerValid && !get(b).primaryDown,"focused drag survived cursor exit");
+        require(!(input->capturedButtons(1,0,1ull<<33)&(1ull<<32)) &&
+            (input->capturedButtons(1,0,1ull<<33)&(1ull<<33)),
+            "cursor exit either retained the stick or leaked a held click");
+        frame.hands[1].pressed=0; tick();
+        require(!input->capturedButtons(1,0,0),"released focused click remained captured");
+        frame.hands[0].pressed=1ull<<33; tick();
+        require(get(a).primaryDown,"left-hand focused click missing");
+        frame.hands[0].position[0]=100; tick();
+        require(get(b).pointerValid && !get(b).primaryDown,"held click transferred to another conversation");
+        frame.hands[0].pressed=0; tick(); frame.hands[0].pressed=1ull<<33; tick();
+        require(get(b).primaryDown,"new panel did not rearm after neutral");
+        auto legacy=registration(2001);std::uint64_t legacyHandle{};
+        require(api->registerPanel(owner.ownerToken,&legacy,&legacyHandle)==ResultV1::Ok,"legacy coexistence registration failed");
+        PanelPresentationV1 legacyPose;legacyPose.open=1;legacyPose.pose.center[0]=400;
+        require(api->submitPanelPresentation(owner.ownerToken,legacyHandle,&legacyPose)==ResultV1::Ok,"legacy coexistence pose failed");
+        runtime.handleInputFrame({});
+        frame.hands[0].pressed=0;frame.hands[0].forward[0]=1;frame.hands[0].forward[1]=0;
+        frame.hands[1].position[0]=400;frame.hands[1].forward[0]=0;frame.hands[1].forward[1]=1;
+        tick();tick();
+        require(get(legacyHandle).pointerValid,"legacy pointer ownership changed");
+        frame.hands[0].position[0]=-100;frame.hands[0].forward[0]=0;frame.hands[0].forward[1]=1;
+        frame.hands[0].pressed=1ull<<33;tick();
+        require(get(legacyHandle).pointerValid && !get(a).pointerValid && !input->capturedButtons(0,1ull<<33,0),
+            "provisional focused hand captured input while the visible cursor stayed on a legacy panel");
+        require(coop->unregisterConsumerSafely(owner.ownerToken)==ResultV1::Ok,"focused cleanup failed");
+        frame.hands[0].pressed=0; tick();
+        require(!input->capturedButtons(0,0,0) && !input->capturedButtons(1,0,0),"focused retirement leaked capture");
+        inputState.allowPollCapture=false;
     }
 }
 
@@ -275,6 +367,7 @@ int main() try
     require(coop->unregisterConsumerSafely(rejected.ownerToken) == ResultV1::Ok, "replacement cleanup failed");
     runtime.snapshotRenderPanels(*batch);
     require(batch->empty() && !runtime.hasOpenPanels() && !rpsui::render::SceneDepthCapture::requested, "final cleanup retained work");
+    testFocusedPanels();
     std::cout << "256 consumers / 1024 mixed panels / 256 input subscribers: legacy ABI, pagination, render capacity and safe retirement passed.\n";
     return 0;
 }

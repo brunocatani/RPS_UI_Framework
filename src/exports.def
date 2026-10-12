@@ -7,3 +7,4 @@ EXPORTS
     RPSUI_RequestInputApi
     RPSUI_RequestNumberOverlayApi
     RPSUI_RequestRegistryApi
+    RPSUI_RequestFocusedPanelApi

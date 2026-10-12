@@ -7,6 +7,7 @@
 #include "RPSUINumberOverlayApi.h"
 #include "RPSUIPassivePanelApi.h"
 #include "RPSUIRegistryApi.h"
+#include "RPSUIFocusedPanelApi.h"
 
 namespace
 {
@@ -167,6 +168,13 @@ namespace
         return rpsui::FrameworkRuntime::get().registerPassivePanel(owner, *registration, *handle);
     }
     const PassivePanelApiV1 g_passive{.registerPanel = &registerPassivePanel};
+    ResultV1 RPSUI_CALL registerFocusedPanel(std::uint64_t owner,
+        const PanelRegistrationV1* registration, std::uint64_t* handle) noexcept
+    {
+        if (!registration || !handle) return ResultV1::InvalidArgument;
+        return rpsui::FrameworkRuntime::get().registerFocusedPanel(owner, *registration, *handle);
+    }
+    const FocusedPanelApiV1 g_focused{.registerPanel = &registerFocusedPanel};
     const NumberOverlayApiV1 g_numbers{
         .registerOverlay=&registerNumberOverlay,
         .submit=&submitNumberOverlay,
@@ -202,4 +210,10 @@ extern "C" DLLEXPORT const rpsui::sdk::PassivePanelApiV1* RPSUI_CALL
 RPSUI_RequestPassivePanelApi(std::uint32_t requestedVersion) noexcept
 {
     return requestedVersion == 1 ? &g_passive : nullptr;
+}
+
+extern "C" DLLEXPORT const rpsui::sdk::FocusedPanelApiV1* RPSUI_CALL
+RPSUI_RequestFocusedPanelApi(std::uint32_t major, std::uint32_t minimumMinor) noexcept
+{
+    return major == 1 && minimumMinor <= g_focused.minor ? &g_focused : nullptr;
 }

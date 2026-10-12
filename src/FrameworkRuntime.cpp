@@ -366,7 +366,7 @@ namespace rpsui
 
     sdk::ResultV1 FrameworkRuntime::registerPanelImpl(std::uint64_t ownerToken,
         const sdk::PanelRegistrationV1& registration, std::uint64_t& outPanelHandle, bool cooperative,
-        sdk::PanelAgreementV1* agreement, bool numberOverlay, bool passive) noexcept
+        sdk::PanelAgreementV1* agreement, bool numberOverlay, bool passive, bool focusedInput) noexcept
     {
         try {
             outPanelHandle = 0;
@@ -451,6 +451,7 @@ namespace rpsui
                 .flags = registration.flags,
                 .numberOverlay = numberOverlay,
                 .passive = passive || numberOverlay,
+                .focusedInput = focusedInput,
                 .renderCallback = registration.renderCallback,
                 .userData = registration.userData,
                 .callbackGate = std::make_shared<PanelCallbackGate>(),
@@ -481,6 +482,17 @@ namespace rpsui
         const auto result = registerPanelImpl(ownerToken, registration.panel, agreement.panelHandle, true, &agreement);
         if (result == sdk::ResultV1::Ok) agreement.grantedAccess = sdk::RPSUI_PANEL_ACCESS;
         return result;
+    }
+
+    sdk::ResultV1 FrameworkRuntime::registerFocusedPanel(std::uint64_t owner,
+        const sdk::PanelRegistrationV1& registration, std::uint64_t& handle) noexcept
+    {
+        handle = 0;
+        if (registration.structSize < sizeof(registration)) return sdk::ResultV1::InvalidArgument;
+        if (registration.apiVersion != sdk::RPSUI_API_VERSION) return sdk::ResultV1::VersionMismatch;
+        if (!sdk::hasPanelFlag(registration.flags, sdk::PanelFlagV1::FixedSize))
+            return sdk::ResultV1::InvalidArgument;
+        return registerPanelImpl(owner, registration, handle, true, nullptr, false, false, true);
     }
 
     sdk::ResultV1 FrameworkRuntime::registerPassivePanel(std::uint64_t owner,
@@ -729,7 +741,7 @@ namespace rpsui
 
     void FrameworkRuntime::separateNewPanelLocked(PanelRecord& panel) noexcept
     {
-        if (panel.passive) return;
+        if (panel.passive || panel.focusedInput) return;
         for (const auto index : openPanels_) {
             const auto& other = panels_[index];
             if (other.passive || other.panelHandle == panel.panelHandle) {
@@ -923,6 +935,8 @@ namespace rpsui
             pointer_click_gate::reset(state.backGate);
             state.rawPrimaryPrevious = false;
             state.gameplayPressLatched = false;
+            state.focusedPanel = 0;
+            state.focusedPressDrain = false;
         }
         for (auto& scroll : scrollState_) {
             contextual_scroll::reset(scroll);
@@ -1006,6 +1020,59 @@ namespace rpsui
             handState.rawPrimaryPrevious = sample.rawPrimaryDown;
         }
 
+        // Focused panels use the single visible pointer as their capture owner.
+        // Legacy panels retain the existing drag/resize lease rules.
+        bool hasFocusedCandidate = false;
+        for (std::size_t index = 0; index < samples.size(); ++index) {
+            const auto* hit = findPanelLocked(samples[index].hitPanel);
+            hasFocusedCandidate |= hit && hit->focusedInput;
+            auto& state = handState_[index];
+            if (!samples[index].rawPrimaryDown) state.focusedPressDrain = false;
+            if (state.focusedPanel && state.focusedPanel != samples[index].hitPanel) {
+                state.focusedPressDrain |= state.clickGate.leaseAccepted && samples[index].rawPrimaryDown;
+                pointer_click_gate::reset(state.clickGate);
+                pointer_click_gate::reset(state.backGate);
+                if (pointerSelection_.active == pointerHand(index)) {
+                    pointerSelection_.submittedPrimaryDown = false;
+                    pointerSelection_.pressBeganOnPanel = false;
+                    pointerPanelHandle_ = 0;
+                }
+                state.focusedPanel = 0;
+            }
+        }
+        if (hasFocusedCandidate) {
+            const auto candidate = [&](std::size_t index) {
+                const auto& sample = samples[index];
+                return pointer_hand_selection::Candidate{
+                    .valid = sample.rayValid,
+                    .hitsPanel = sample.hitPanel != 0,
+                    .primaryDown = sample.rawPrimaryDown && !handState_[index].gameplayPressLatched &&
+                        !handState_[index].focusedPressDrain,
+                    .navigationIntent = sample.rawBackDown ||
+                        contextual_scroll::remapAxis(sample.stick.x) != 0 ||
+                        contextual_scroll::remapAxis(sample.stick.y) != 0,
+                };
+            };
+            const auto owner = pointer_hand_selection::choose(pointerSelection_, candidate(0), candidate(1),
+                snapshot.leftHanded ? pointer_hand_selection::Hand::Left : pointer_hand_selection::Hand::Right).hand;
+            for (std::size_t index = 0; index < samples.size(); ++index) {
+                const auto* hit = findPanelLocked(samples[index].hitPanel);
+                if (!hit || !hit->focusedInput) continue;
+                auto& state = handState_[index];
+                if (owner != pointerHand(index)) {
+                    state.focusedPressDrain |= state.clickGate.leaseAccepted && samples[index].rawPrimaryDown;
+                    samples[index].hitPanel = 0;
+                    state.focusedPanel = 0;
+                    pointer_click_gate::reset(state.clickGate);
+                    pointer_click_gate::reset(state.backGate);
+                } else if (state.focusedPanel != samples[index].hitPanel) {
+                    pointer_click_gate::reset(state.clickGate);
+                    pointer_click_gate::reset(state.backGate);
+                    state.focusedPanel = samples[index].hitPanel;
+                }
+            }
+        }
+
         for (std::size_t index = 0; index < samples.size(); ++index) {
             const auto hand = pointerHand(index);
             const auto selectedPolicyHand = hand;
@@ -1022,8 +1089,18 @@ namespace rpsui
                  ownsPress ||
                  resizing);
             if (wantsLease) {
-                samples[index].leaseAccepted =
-                    requestInputSuppressionLocked(snapshot, hand);
+                if (handState_[index].focusedPanel) {
+                    samples[index].leaseAccepted = input::captureHost(static_cast<unsigned>(index),
+                        snapshot.ready, samples[index].configNavigation);
+                    if (samples[index].leaseAccepted) suppressedHands_ |= suppressionBit(hand);
+                } else {
+                    samples[index].leaseAccepted = requestInputSuppressionLocked(snapshot, hand);
+                }
+            } else if (handState_[index].focusedPressDrain) {
+                // Prevent an already consumed click becoming a shot on pointer exit.
+                // The locomotion/turn stick is released on this same input frame.
+                input::captureHost(static_cast<unsigned>(index), snapshot.ready, false, false);
+                suppressedHands_ |= suppressionBit(hand);
             } else {
                 clearInputSuppressionLocked(hand);
             }
@@ -1063,7 +1140,22 @@ namespace rpsui
             }
         }
 
+        const auto releaseUnselectedFocused = [&](pointer_hand_selection::Hand selected) {
+            for (std::size_t index=0;index<samples.size();++index) {
+                auto& state=handState_[index];
+                if (!state.focusedPanel || pointerHand(index)==selected) continue;
+                state.focusedPressDrain |= state.clickGate.leaseAccepted && state.clickGate.neutralObserved && samples[index].rawPrimaryDown;
+                state.focusedPanel=0;
+                pointer_click_gate::reset(state.clickGate);
+                pointer_click_gate::reset(state.backGate);
+                if (state.focusedPressDrain) {
+                    input::captureHost(static_cast<unsigned>(index),snapshot.ready,false,false);
+                } else clearInputSuppressionLocked(pointerHand(index));
+            }
+        };
+
         if (activeResize_.active) {
+            releaseUnselectedFocused(activeResize_.hand);
             const std::size_t index =
                 handIndex(activeResize_.hand);
             auto& sample = samples[index];
@@ -1153,6 +1245,7 @@ namespace rpsui
             leftCandidate,
             rightCandidate,
             preferred);
+        releaseUnselectedFocused(decision.hand);
         if (decision.hand == pointer_hand_selection::Hand::None) {
             return;
         }
@@ -1181,7 +1274,7 @@ namespace rpsui
         }
         const bool controlsPanel =
             sdk::panelContains(panel->flags, hit.u, hit.v) ||
-            (decision.previousPrimaryDown && decision.pressBeganOnPanel);
+            (!panel->focusedInput && decision.previousPrimaryDown && decision.pressBeganOnPanel);
         const auto resizeHandle =
             hit.inside && !sdk::hasPanelFlag(panel->flags, sdk::PanelFlagV1::FixedSize) ?
             panel_resize::hitTest(
@@ -1272,6 +1365,12 @@ namespace rpsui
     {
         try {
             std::scoped_lock lock(mutex_);
+            // Polling threads observe the preceding complete mask until the
+            // new pointer decision is final, never provisional hand captures.
+            struct HostFrame {
+                HostFrame() noexcept {input::beginHostFrame();}
+                ~HostFrame() {input::endHostFrame();}
+            } hostFrame;
             numberInputReady_=snapshot.ready;
             if (!snapshot.ready) {
                 clearPointerStateLocked();

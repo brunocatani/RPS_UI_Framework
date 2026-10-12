@@ -34,7 +34,8 @@ struct State {
  std::atomic_bool installed{},session{},allowPollCapture{};
  std::atomic_uint32_t devices[2]{vr::k_unTrackedDeviceIndexInvalid,vr::k_unTrackedDeviceIndexInvalid};
  std::atomic_uint64_t raw[2]{};
- bool hostCapture[2]{},hostConfig[2]{};
+ bool hostCapture[2]{},hostConfig[2]{},hostStick[2]{};
+ bool hostFrame{}; // Serialized by FrameworkRuntime's control mutex.
  unsigned failureStage{};
  unsigned handStage[2]{};
  State(){liveClients.reserve(maxClients);callbacks.reserve(maxClients);}
@@ -221,12 +222,19 @@ bool start() noexcept {
 bool installed() noexcept{return state().installed.load();}
 void sessionReady(bool ready) noexcept{state().session=ready;if(!ready)state().allowPollCapture=false;}
 bool rawButton(unsigned hand,unsigned button) noexcept{return hand<2 && button<64 && (state().frame.hands[hand].pressed&(1ull<<button));}
-bool captureHost(unsigned hand,bool active,bool configNavigation) noexcept {
- auto& s=state();if(hand>=2)return false;s.hostCapture[hand]=active;s.hostConfig[hand]=configNavigation;
+void publishHostCapture() noexcept {
+ auto& s=state();sdk::InputCaptureV1 request;
+ for(unsigned side=0;side<2;++side)if(s.hostCapture[side])
+  request.buttons[side]=trigger|accept|(s.hostStick[side]?(1ull<<32):0)|(s.hostConfig[side]?grip:0);
+ publishMask(0,request);
+}
+void beginHostFrame() noexcept {state().hostFrame=true;}
+void endHostFrame() noexcept {state().hostFrame=false;publishHostCapture();}
+bool captureHost(unsigned hand,bool active,bool configNavigation,bool captureStick) noexcept {
+ auto& s=state();if(hand>=2)return false;s.hostCapture[hand]=active;s.hostConfig[hand]=configNavigation;s.hostStick[hand]=captureStick;
  // The pointing stick scrolls the panel; its analog axis must not also move
  // the player. Raw UI sampling remains unfiltered.
- sdk::InputCaptureV1 request;for(unsigned side=0;side<2;++side)if(s.hostCapture[side])request.buttons[side]=trigger|accept|(1ull<<32)|(s.hostConfig[side]?grip:0);
- publishMask(0,request);return true;
+ if(!s.hostFrame)publishHostCapture();return true;
 }
 }
 extern "C" __declspec(dllexport) const rpsui::sdk::InputApiV1* RPSUI_CALL RPSUI_RequestInputApi() noexcept {

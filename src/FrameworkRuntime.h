@@ -132,6 +132,8 @@ namespace rpsui
             const sdk::NumberOverlayRegistrationV1&,std::uint64_t& outHandle) noexcept;
         sdk::ResultV1 registerPassivePanel(std::uint64_t ownerToken,
             const sdk::PanelRegistrationV1&, std::uint64_t& outHandle) noexcept;
+        sdk::ResultV1 registerFocusedPanel(std::uint64_t ownerToken,
+            const sdk::PanelRegistrationV1&, std::uint64_t& outHandle) noexcept;
         sdk::ResultV1 submitNumberOverlay(std::uint64_t ownerToken,std::uint64_t handle,
             const sdk::NumberOverlayPresentationV1&) noexcept;
 
@@ -181,7 +183,7 @@ namespace rpsui
             float maximumPhysicalWidth{ 0.0f };
             std::int32_t sortOrder{ 0 };
             std::uint32_t flags{ 0 };
-            bool numberOverlay{}, passive{};
+            bool numberOverlay{}, passive{}, focusedInput{};
             std::uint32_t number{};
             float numberOpacity{0.55f};
             rpsui::sdk::PanelRenderCallbackV1 renderCallback{ nullptr };
@@ -220,6 +222,8 @@ namespace rpsui
             pointer_click_gate::State backGate{};
             bool rawPrimaryPrevious{ false };
             bool gameplayPressLatched{ false };
+            std::uint64_t focusedPanel{};
+            bool focusedPressDrain{};
         };
 
         struct ActiveResize
@@ -238,7 +242,8 @@ namespace rpsui
 
         sdk::ResultV1 registerPanelImpl(std::uint64_t ownerToken,
             const sdk::PanelRegistrationV1&, std::uint64_t& outPanelHandle, bool cooperative,
-            sdk::PanelAgreementV1* agreement = nullptr, bool numberOverlay = false, bool passive = false) noexcept;
+            sdk::PanelAgreementV1* agreement = nullptr, bool numberOverlay = false, bool passive = false,
+            bool focusedInput = false) noexcept;
         sdk::ResultV1 unregisterPanelImpl(std::uint64_t ownerToken, std::uint64_t panelHandle, bool drain) noexcept;
         sdk::ResultV1 unregisterConsumerImpl(std::uint64_t ownerToken, bool drain) noexcept;
 
