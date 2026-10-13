@@ -52,6 +52,7 @@ int main()
     static_assert(offsetof(WorldTextV1, anchor) == 128);
     static_assert(offsetof(WorldDrawApiV1, submit) == 16);
     static_assert(offsetof(WorldDrawApiV1, releaseMesh) == 40);
+    static_assert(offsetof(WorldDrawApiV1, setFrameCallback) == 48);
 
     Store store;
     RenderBatch batch;
@@ -145,5 +146,43 @@ int main()
     }
     assert(store.registerMesh(9, 99999, mesh) == ResultV1::CapacityReached);
     assert(store.registerMesh(9, 1000, mesh) == ResultV1::Ok); // Replacing stays allowed.
+
+    // Frame callbacks run before the snapshot and may submit for that frame only.
+    struct CallbackProbe
+    {
+        Store* store{ nullptr };
+        std::uint64_t owner{ 0 };
+        std::uint64_t lastFrame{ 0 };
+        int calls{ 0 };
+        std::vector<WorldSphereV1> spheres{ sphere(3.0f) };
+    } probe{ &store, 11 };
+    const WorldDrawFrameCallbackV1 callback = [](void* context, std::uint64_t frame) noexcept {
+        auto& self = *static_cast<CallbackProbe*>(context);
+        ++self.calls;
+        self.lastFrame = frame;
+        // The API stamps submissions with the last drawn frame, frame - 1.
+        (void)self.store->submit(self.owner, publication(self.spheres, 1), frame - 1);
+    };
+    assert(store.setFrameCallback(11, callback, &probe) == ResultV1::OwnerNotRegistered);
+    store.addOwner(11);
+    assert(store.setFrameCallback(11, callback, &probe) == ResultV1::Ok);
+    assert(store.hasFrameCallback(11));
+    store.runFrameCallbacks(60);
+    assert(probe.calls == 1 && probe.lastFrame == 60);
+    assert(store.snapshot(60, batch) && batch.spheres.size() == 1 && batch.spheres[0].center[0] == 3.0f);
+    assert(!store.snapshot(61, batch)); // A one-frame lease ends after that frame.
+    assert(store.setFrameCallback(11, nullptr, nullptr) == ResultV1::Ok);
+    assert(!store.hasFrameCallback(11));
+    store.runFrameCallbacks(61);
+    assert(probe.calls == 1);
+
+    // Closing an owner stops its callback and drawing; removal forgets it.
+    assert(store.setFrameCallback(11, callback, &probe) == ResultV1::Ok);
+    assert(store.closeOwner(11));
+    store.runFrameCallbacks(70);
+    assert(probe.calls == 1 && !store.snapshot(70, batch));
+    assert(store.submit(11, publication(one), 70) == ResultV1::OwnerNotRegistered);
+    store.removeOwner(11);
+    assert(!store.hasFrameCallback(11));
     return 0;
 }

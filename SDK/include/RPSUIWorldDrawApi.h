@@ -22,8 +22,10 @@ namespace rpsui::sdk
     // after UI panels, with the depth test off, so it stays visible through
     // geometry. Text is anchored to a world point; there is no screen-positioned
     // drawing. Uses an existing consumer owner token. The host copies every
-    // array during the call and owns all GPU resources; there is no consumer
-    // render callback and no borrowed payload.
+    // array during the call and owns all GPU resources; nothing is borrowed.
+    //
+    // A producer whose data is only final late in the frame (for example after
+    // the physics step) registers a frame callback and submits from it.
     enum class WorldFillV1 : std::uint32_t
     {
         Solid = 0,
@@ -101,6 +103,13 @@ namespace rpsui::sdk
         const WorldMeshInstanceV1* meshInstances{ nullptr };
     };
 
+    // Called on the render thread once per drawn frame, before the host takes
+    // its snapshot. The callback may call submit, clear, registerMesh and
+    // releaseMesh for its own owner; it must not call other RPS UI functions.
+    // Submitting from it with leaseFrames = 1 shows the data for exactly this
+    // frame. It must stay brief: it delays the frame.
+    using WorldDrawFrameCallbackV1 = void(RPSUI_CALL*)(void* context, std::uint64_t frame) noexcept;
+
     struct WorldDrawApiV1
     {
         std::uint32_t structSize{ sizeof(WorldDrawApiV1) };
@@ -117,6 +126,12 @@ namespace rpsui::sdk
             std::uint64_t meshId, const WorldMeshV1* mesh) noexcept{};
         ResultV1 (RPSUI_CALL* releaseMesh)(std::uint64_t ownerToken,
             std::uint64_t meshId) noexcept{};
+        // Replaces the owner's frame callback; null removes it. After the call
+        // returns the previous callback is not started again. CallbackBusy
+        // means it is still running: retry until Ok before releasing its
+        // context. An owner with a callback must unregister until Ok as well.
+        ResultV1 (RPSUI_CALL* setFrameCallback)(std::uint64_t ownerToken,
+            WorldDrawFrameCallbackV1 callback, void* context) noexcept{};
     };
 
     // Returns null when RPS UI Framework is absent or does not offer this
@@ -131,7 +146,8 @@ namespace rpsui::sdk
         const auto* api = reinterpret_cast<Request>(address)(RPSUI_WORLD_DRAW_VERSION);
         return api && api->structSize >= sizeof(WorldDrawApiV1) &&
             api->apiVersion == RPSUI_WORLD_DRAW_VERSION && api->apiFlavor == RPSUI_API_FLAVOR &&
-            api->submit && api->clear && api->registerMesh && api->releaseMesh ? api : nullptr;
+            api->submit && api->clear && api->registerMesh && api->releaseMesh && api->setFrameCallback ?
+            api : nullptr;
     }
 
     static_assert(std::is_standard_layout_v<WorldSphereV1> && sizeof(WorldSphereV1) == 48);
@@ -140,5 +156,5 @@ namespace rpsui::sdk
     static_assert(std::is_standard_layout_v<WorldMeshInstanceV1> && sizeof(WorldMeshInstanceV1) == 96);
     static_assert(std::is_standard_layout_v<WorldMeshV1> && sizeof(WorldMeshV1) == 32);
     static_assert(std::is_standard_layout_v<WorldDrawPublicationV1> && sizeof(WorldDrawPublicationV1) == 64);
-    static_assert(std::is_standard_layout_v<WorldDrawApiV1> && sizeof(WorldDrawApiV1) == 48);
+    static_assert(std::is_standard_layout_v<WorldDrawApiV1> && sizeof(WorldDrawApiV1) == 56);
 }

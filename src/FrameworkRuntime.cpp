@@ -322,15 +322,16 @@ namespace rpsui
                 return rpsui::sdk::ResultV1::OwnerNotRegistered;
             }
 
-            // Cooperative panels cannot bypass safe retirement through V1.
-            drain = drain || consumer->closing || std::any_of(panels_.begin(), panels_.end(),
+            // Cooperative panels and world-draw frame callbacks cannot bypass
+            // safe retirement through V1.
+            drain = drain || consumer->closing || world_draw::store().hasFrameCallback(ownerToken) ||
+                std::any_of(panels_.begin(), panels_.end(),
                 [ownerToken](const PanelRecord& panel) {
                     return panel.ownerToken == ownerToken && (panel.cooperative || panel.closing);
                 });
             consumer->closing = true;
-            // A closing owner stops drawing at once, even while panel callbacks drain.
-            world_draw::store().removeOwner(ownerToken);
-            bool drained = true;
+            // A closing owner stops drawing at once, even while callbacks drain.
+            bool drained = world_draw::store().closeOwner(ownerToken);
             bool ownedInteraction = false;
             for (auto& panel : panels_) {
                 if (panel.ownerToken != ownerToken) continue;
@@ -355,6 +356,7 @@ namespace rpsui
                     }),
                 panels_.end());
             consumers_.erase(consumer);
+            world_draw::store().removeOwner(ownerToken);
             rebuildOpenPanelsLocked();
             ++registryRevision_;
             return rpsui::sdk::ResultV1::Ok;

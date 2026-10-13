@@ -1,5 +1,6 @@
 #pragma once
 
+#include "PanelCooperation.h"
 #include "RPSUIWorldDrawApi.h"
 
 #include <cstddef>
@@ -67,9 +68,20 @@ namespace rpsui::world_draw
     class Store final
     {
     public:
-        // Owner lifetime follows RPS UI consumer registration.
+        // Owner lifetime follows RPS UI consumer registration. closeOwner stops
+        // all drawing and callbacks and returns whether no callback is still
+        // running; removeOwner then forgets the owner.
         void addOwner(std::uint64_t owner) noexcept;
+        [[nodiscard]] bool closeOwner(std::uint64_t owner) noexcept;
         void removeOwner(std::uint64_t owner) noexcept;
+        [[nodiscard]] bool hasFrameCallback(std::uint64_t owner) const noexcept;
+
+        [[nodiscard]] sdk::ResultV1 setFrameCallback(std::uint64_t owner,
+            sdk::WorldDrawFrameCallbackV1 callback, void* context) noexcept;
+        // Render thread, before the frame counter advances to frame. Calls every
+        // open owner's callback without holding the store lock, so callbacks may
+        // submit.
+        void runFrameCallbacks(std::uint64_t frame) noexcept;
 
         // frame is the renderer frame counter when the call is made.
         [[nodiscard]] sdk::ResultV1 submit(std::uint64_t owner,
@@ -84,9 +96,18 @@ namespace rpsui::world_draw
         bool snapshot(std::uint64_t frame, RenderBatch& out) const noexcept;
 
     private:
+        struct FrameCallback
+        {
+            sdk::WorldDrawFrameCallbackV1 callback{ nullptr };
+            void* context{ nullptr };
+            std::shared_ptr<PanelCallbackGate> gate;
+        };
+
         struct OwnerState
         {
             std::uint64_t owner{ 0 };
+            bool closing{ false };
+            FrameCallback frameCallback;
             std::uint64_t expiresAfterFrame{ 0 };
             bool published{ false };
             std::vector<sdk::WorldSphereV1> spheres;
@@ -101,6 +122,7 @@ namespace rpsui::world_draw
 
         mutable std::mutex mutex_;
         std::vector<OwnerState> owners_;
+        std::vector<FrameCallback> pendingCallbacks_; // Render thread only.
         std::uint64_t nextRevision_{ 1 };
     };
 

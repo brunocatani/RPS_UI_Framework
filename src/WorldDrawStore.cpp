@@ -75,11 +75,12 @@ namespace rpsui::world_draw
         return spheres.empty() && lines.empty() && texts.empty() && instances.empty();
     }
 
+    // Returns open owners only; a closing owner accepts no further calls.
     Store::OwnerState* Store::findLocked(std::uint64_t owner) noexcept
     {
         const auto found = std::find_if(owners_.begin(), owners_.end(),
             [owner](const OwnerState& state) { return state.owner == owner; });
-        return found == owners_.end() ? nullptr : &*found;
+        return found == owners_.end() || found->closing ? nullptr : &*found;
     }
 
     void Store::addOwner(std::uint64_t owner) noexcept
@@ -92,6 +93,67 @@ namespace rpsui::world_draw
         } catch (...) {
             // The owner simply cannot draw; every call reports OwnerNotRegistered.
         }
+    }
+
+    bool Store::closeOwner(std::uint64_t owner) noexcept
+    {
+        std::scoped_lock lock(mutex_);
+        const auto found = std::find_if(owners_.begin(), owners_.end(),
+            [owner](const OwnerState& state) { return state.owner == owner; });
+        if (found == owners_.end()) return true;
+        found->closing = true;
+        found->published = false;
+        found->spheres.clear();
+        found->lines.clear();
+        found->texts.clear();
+        found->meshInstances.clear();
+        found->meshes.clear();
+        found->meshBytes = 0;
+        return !found->frameCallback.gate || found->frameCallback.gate->close();
+    }
+
+    bool Store::hasFrameCallback(std::uint64_t owner) const noexcept
+    {
+        std::scoped_lock lock(mutex_);
+        return std::any_of(owners_.begin(), owners_.end(), [owner](const OwnerState& state) {
+            return state.owner == owner && state.frameCallback.gate;
+        });
+    }
+
+    ResultV1 Store::setFrameCallback(std::uint64_t owner, sdk::WorldDrawFrameCallbackV1 callback,
+        void* context) noexcept
+    {
+        try {
+            auto gate = callback ? std::make_shared<PanelCallbackGate>() : nullptr;
+            std::scoped_lock lock(mutex_);
+            auto* state = findLocked(owner);
+            if (!state) return ResultV1::OwnerNotRegistered;
+            const auto previous = std::move(state->frameCallback.gate);
+            state->frameCallback = { callback, callback ? context : nullptr, std::move(gate) };
+            return !previous || previous->close() ? ResultV1::Ok : ResultV1::CallbackBusy;
+        } catch (...) {
+            return ResultV1::InternalError;
+        }
+    }
+
+    void Store::runFrameCallbacks(std::uint64_t frame) noexcept
+    {
+        try {
+            {
+                std::scoped_lock lock(mutex_);
+                pendingCallbacks_.clear();
+                for (const auto& state : owners_) {
+                    if (!state.closing && state.frameCallback.gate) pendingCallbacks_.push_back(state.frameCallback);
+                }
+            }
+            for (const auto& entry : pendingCallbacks_) {
+                PanelCallbackScope scope(entry.gate);
+                if (scope) entry.callback(entry.context, frame);
+            }
+        } catch (...) {
+            // Allocation failure only: this frame's callbacks are skipped.
+        }
+        pendingCallbacks_.clear();
     }
 
     void Store::removeOwner(std::uint64_t owner) noexcept

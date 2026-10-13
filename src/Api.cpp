@@ -191,11 +191,15 @@ namespace
     }
     ResultV1 RPSUI_CALL releaseWorldMesh(std::uint64_t owner, std::uint64_t meshId) noexcept
     { return rpsui::world_draw::store().releaseMesh(owner, meshId); }
+    ResultV1 RPSUI_CALL setWorldDrawFrameCallback(std::uint64_t owner, WorldDrawFrameCallbackV1 callback,
+        void* context) noexcept
+    { return rpsui::world_draw::store().setFrameCallback(owner, callback, context); }
     const WorldDrawApiV1 g_worldDraw{
         .submit = &submitWorldDraw,
         .clear = &clearWorldDraw,
         .registerMesh = &registerWorldMesh,
         .releaseMesh = &releaseWorldMesh,
+        .setFrameCallback = &setWorldDrawFrameCallback,
     };
 
     const NumberOverlayApiV1 g_numbers{

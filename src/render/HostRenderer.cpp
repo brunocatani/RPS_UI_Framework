@@ -769,8 +769,13 @@ namespace rpsui::render
         if (!renderLock.owns_lock()) return;
         auto& panels = state.panels;
         FrameworkRuntime::get().snapshotRenderPanels(panels);
-        // World drawing needs neither an open panel nor scene depth.
-        const auto worldFrame = world_draw::advanceFrame();
+        // World drawing needs neither an open panel nor scene depth. Late
+        // producers submit from their frame callbacks before the snapshot.
+        // Callbacks run before the counter advances, so their submissions
+        // (stamped with currentFrame) cover exactly this frame per leased frame.
+        const auto worldFrame = world_draw::currentFrame() + 1;
+        world_draw::store().runFrameCallbacks(worldFrame);
+        (void)world_draw::advanceFrame();
         const bool hasWorld = world_draw::store().snapshot(worldFrame, state.world);
         if (panels.empty()) {
             state.panelGpu.clear();
