@@ -125,6 +125,23 @@ int main() {
         require(!selector::resolve(entry,read,owns).target,"Unrecognized relay accepted");
         memory.put(entry,std::array<std::uint8_t,5>{0xCC});
         require(!selector::resolve(entry,read,owns).target,"Unknown selector modification accepted");
+
+        // September 26/27 PALM reports: both signed E9 displacements target
+        // a relay below the game image. The released 1.1 DLL rejected them
+        // before reaching the resolver. Preserve these inputs as regressions.
+        for(const auto bytes:{std::array<std::uint8_t,5>{0xE9,0x8D,0xB8,0xF1,0x80},
+                             std::array<std::uint8_t,5>{0xE9,0x8D,0xB8,0xF8,0x80}}) {
+            memory={};memory.put(entry,bytes);
+            std::int32_t relative{};std::memcpy(&relative,bytes.data()+1,sizeof(relative));
+            const auto reportedRelay=static_cast<std::uintptr_t>(static_cast<std::int64_t>(entry+5)+relative);
+            require(reportedRelay<base,"Reported negative displacement fixture is invalid");
+            memory.put(reportedRelay,std::array<std::uint8_t,6>{0xFF,0x25,0,0,0,0});
+            memory.put(reportedRelay+6,ownedCode);
+            binding=selector::resolve(entry,read,owns);
+            require(binding.target==ownedCode && binding.trueScopes,"Reported True Scopes selector jump rejected");
+            memory.put(reportedRelay+6,ownedCode+8);
+            require(!selector::resolve(entry,read,owns).target,"Reported jump bypassed the module ownership check");
+        }
         std::cout<<"Native scene target roles, missing allocations, and failed pointer hops passed\n";
         return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
