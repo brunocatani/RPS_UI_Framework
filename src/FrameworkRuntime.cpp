@@ -6,6 +6,7 @@
 
 #include "Logger.h"
 #include "render/SceneDepthCapture.h"
+#include "WorldDrawStore.h"
 
 #include "vrcf/VRControllersManager.h"
 
@@ -286,6 +287,8 @@ namespace rpsui
                 .grantedFeatures = granted,
             });
             ++registryRevision_;
+            // Lock order: runtime, then world-draw store. The store never calls back.
+            world_draw::store().addOwner(token);
             outHandle.ownerToken = token;
             outHandle.grantedFeatures = granted;
             log::info(
@@ -325,6 +328,8 @@ namespace rpsui
                     return panel.ownerToken == ownerToken && (panel.cooperative || panel.closing);
                 });
             consumer->closing = true;
+            // A closing owner stops drawing at once, even while panel callbacks drain.
+            world_draw::store().removeOwner(ownerToken);
             bool drained = true;
             bool ownedInteraction = false;
             for (auto& panel : panels_) {

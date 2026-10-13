@@ -33,9 +33,11 @@ namespace rpsui::render
         Microsoft::WRL::ComPtr<ID3D11InputLayout> inputLayout_;
         D3D11_PRIMITIVE_TOPOLOGY topology_ =
             D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
-        Microsoft::WRL::ComPtr<ID3D11Buffer> vertexBuffer_;
-        UINT vertexStride_ = 0;
-        UINT vertexOffset_ = 0;
+        // Two slots: world drawing binds per-instance data in slot 1.
+        static constexpr UINT kVertexBufferSlots = 2;
+        std::array<ID3D11Buffer*, kVertexBufferSlots> vertexBuffers_{};
+        std::array<UINT, kVertexBufferSlots> vertexStrides_{};
+        std::array<UINT, kVertexBufferSlots> vertexOffsets_{};
         Microsoft::WRL::ComPtr<ID3D11Buffer> indexBuffer_;
         DXGI_FORMAT indexFormat_ = DXGI_FORMAT_UNKNOWN;
         UINT indexOffset_ = 0;

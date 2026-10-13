@@ -6,5 +6,6 @@ EXPORTS
     RPSUI_RequestCooperationApi
     RPSUI_RequestInputApi
     RPSUI_RequestNumberOverlayApi
+    RPSUI_RequestWorldDrawApi
     RPSUI_RequestRegistryApi
     RPSUI_RequestFocusedPanelApi

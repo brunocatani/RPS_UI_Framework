@@ -8,6 +8,8 @@
 #include "RPSUIPassivePanelApi.h"
 #include "RPSUIRegistryApi.h"
 #include "RPSUIFocusedPanelApi.h"
+#include "RPSUIWorldDrawApi.h"
+#include "WorldDrawStore.h"
 
 namespace
 {
@@ -175,6 +177,27 @@ namespace
         return rpsui::FrameworkRuntime::get().registerFocusedPanel(owner, *registration, *handle);
     }
     const FocusedPanelApiV1 g_focused{.registerPanel = &registerFocusedPanel};
+    ResultV1 RPSUI_CALL submitWorldDraw(std::uint64_t owner, const WorldDrawPublicationV1* publication) noexcept
+    {
+        if (!publication) return ResultV1::InvalidArgument;
+        return rpsui::world_draw::store().submit(owner, *publication, rpsui::world_draw::currentFrame());
+    }
+    ResultV1 RPSUI_CALL clearWorldDraw(std::uint64_t owner) noexcept
+    { return rpsui::world_draw::store().clear(owner); }
+    ResultV1 RPSUI_CALL registerWorldMesh(std::uint64_t owner, std::uint64_t meshId, const WorldMeshV1* mesh) noexcept
+    {
+        if (!mesh) return ResultV1::InvalidArgument;
+        return rpsui::world_draw::store().registerMesh(owner, meshId, *mesh);
+    }
+    ResultV1 RPSUI_CALL releaseWorldMesh(std::uint64_t owner, std::uint64_t meshId) noexcept
+    { return rpsui::world_draw::store().releaseMesh(owner, meshId); }
+    const WorldDrawApiV1 g_worldDraw{
+        .submit = &submitWorldDraw,
+        .clear = &clearWorldDraw,
+        .registerMesh = &registerWorldMesh,
+        .releaseMesh = &releaseWorldMesh,
+    };
+
     const NumberOverlayApiV1 g_numbers{
         .registerOverlay=&registerNumberOverlay,
         .submit=&submitNumberOverlay,
@@ -200,6 +223,11 @@ extern "C" DLLEXPORT const rpsui::sdk::NumberOverlayApiV1* RPSUI_CALL
 RPSUI_RequestNumberOverlayApi(std::uint32_t requestedVersion) noexcept
 {
     return requestedVersion==rpsui::sdk::RPSUI_NUMBER_OVERLAY_VERSION ? &g_numbers : nullptr;
+}
+extern "C" DLLEXPORT const rpsui::sdk::WorldDrawApiV1* RPSUI_CALL
+RPSUI_RequestWorldDrawApi(std::uint32_t requestedVersion) noexcept
+{
+    return requestedVersion == rpsui::sdk::RPSUI_WORLD_DRAW_VERSION ? &g_worldDraw : nullptr;
 }
 extern "C" DLLEXPORT const rpsui::sdk::RegistryApiV1* RPSUI_CALL
 RPSUI_RequestRegistryApi(std::uint32_t requestedVersion) noexcept

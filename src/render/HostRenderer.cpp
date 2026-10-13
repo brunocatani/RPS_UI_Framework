@@ -6,8 +6,10 @@
 #include "render/HostRenderer.h"
 #include "render/SceneDepthCapture.h"
 #include "render/StereoProjection.h"
+#include "render/WorldDrawRenderer.h"
 #include "render/WorldPanelDepth.h"
 #include "NumberOverlayLayout.h"
+#include "WorldDrawStore.h"
 
 #include <DirectXTK/CommonStates.h>
 #include <DirectXTK/Effects.h>
@@ -50,6 +52,7 @@ namespace rpsui::render
             bool digitAtlasFailed{};
             std::unordered_map<std::uint64_t, PanelGpu> panelGpu;
             RenderPanelBatch panels;
+            world_draw::RenderBatch world;
 
             bool initialized{ false };
             bool initializationFailed{ false };
@@ -766,9 +769,12 @@ namespace rpsui::render
         if (!renderLock.owns_lock()) return;
         auto& panels = state.panels;
         FrameworkRuntime::get().snapshotRenderPanels(panels);
+        // World drawing needs neither an open panel nor scene depth.
+        const auto worldFrame = world_draw::advanceFrame();
+        const bool hasWorld = world_draw::store().snapshot(worldFrame, state.world);
         if (panels.empty()) {
             state.panelGpu.clear();
-            return;
+            if (!hasWorld) return;
         }
         if (!initialize(state, texture)) {
             return;
@@ -785,66 +791,76 @@ namespace rpsui::render
             return;
         }
 
-        const auto depth =
-            SceneDepthCapture::AcquireForSubmittedTarget(
+        SceneDepthCapture::FrameDepth depth{};
+        bool drawPanels = !panels.empty();
+        if (drawPanels) {
+            depth = SceneDepthCapture::AcquireForSubmittedTarget(
                 texture,
                 outputDescription);
-        reportDepthState(state, depth, outputDescription);
-        if (!depth.IsValid()) {
+            reportDepthState(state, depth, outputDescription);
+            drawPanels = depth.IsValid();
+        }
+        if (!drawPanels && !hasWorld) {
             return;
         }
 
         StereoProjection::Snapshot projection{};
         const bool projectionValid = StereoProjection::CaptureSnapshot(projection);
-        const bool traceSample = reportOcclusionSample(state, depth, outputDescription,
+        const bool traceSample = drawPanels && reportOcclusionSample(state, depth, outputDescription,
             projectionValid ? &projection : nullptr);
         if (!projectionValid) {
             return;
         }
 
-        const auto now = std::chrono::steady_clock::now();
-        const float deltaSeconds = std::clamp(
-            std::chrono::duration<float>(
-                now - state.lastFrame).count(),
-            1.0f / 240.0f,
-            0.1f);
-        state.lastFrame = now;
-        ++state.frameSequence;
-
         ScopedPresentationState presentationState(state);
-        for (const auto& panel : panels) {
-            PanelCallbackScope callbackScope(panel.callbackGate);
-            if (!callbackScope) continue;
-            auto* gpu = ensurePanelGpu(state, panel);
-            if (!gpu) {
-                if (traceSample) reportPanelProjection(panel, projection, depth.frameEpoch, false);
-                continue;
-            }
-            if (!renderConsumerPanel(
+        if (drawPanels) {
+            const auto now = std::chrono::steady_clock::now();
+            const float deltaSeconds = std::clamp(
+                std::chrono::duration<float>(
+                    now - state.lastFrame).count(),
+                1.0f / 240.0f,
+                0.1f);
+            state.lastFrame = now;
+            ++state.frameSequence;
+
+            for (const auto& panel : panels) {
+                PanelCallbackScope callbackScope(panel.callbackGate);
+                if (!callbackScope) continue;
+                auto* gpu = ensurePanelGpu(state, panel);
+                if (!gpu) {
+                    if (traceSample) reportPanelProjection(panel, projection, depth.frameEpoch, false);
+                    continue;
+                }
+                if (!renderConsumerPanel(
+                        state,
+                        panel,
+                        *gpu,
+                        deltaSeconds)) {
+                    if (traceSample) reportPanelProjection(panel, projection, depth.frameEpoch, false);
+                    continue;
+                }
+                const bool drawn = drawWorldPanel(
                     state,
                     panel,
-                    *gpu,
-                    deltaSeconds)) {
-                if (traceSample) reportPanelProjection(panel, projection, depth.frameEpoch, false);
-                continue;
+                    gpu->shaderResource.Get(),
+                    projection,
+                    depth,
+                    outputDescription);
+                if (traceSample) reportPanelProjection(panel, projection, depth.frameEpoch, drawn);
             }
-            const bool drawn = drawWorldPanel(
-                state,
-                panel,
-                gpu->shaderResource.Get(),
-                projection,
-                depth,
-                outputDescription);
-            if (traceSample) reportPanelProjection(panel, projection, depth.frameEpoch, drawn);
-        }
 
-        for (auto it = state.panelGpu.begin();
-             it != state.panelGpu.end();) {
-            if (it->second.lastSeenFrame != state.frameSequence) {
-                it = state.panelGpu.erase(it);
-            } else {
-                ++it;
+            for (auto it = state.panelGpu.begin();
+                 it != state.panelGpu.end();) {
+                if (it->second.lastSeenFrame != state.frameSequence) {
+                    it = state.panelGpu.erase(it);
+                } else {
+                    ++it;
+                }
             }
+        }
+        if (hasWorld) {
+            WorldDrawRenderer::Draw(state.device.Get(), state.context.Get(), state.submittedRenderTarget.Get(),
+                outputDescription, projection, state.world, worldFrame);
         }
     }
 
@@ -853,6 +869,8 @@ namespace rpsui::render
         auto& state = resources();
         std::scoped_lock lock(state.renderMutex);
         state.panels.clear();
+        state.world.clear();
+        WorldDrawRenderer::ReleaseDeviceResources();
         releaseDeviceResources(state);
         SceneDepthCapture::Reset();
     }

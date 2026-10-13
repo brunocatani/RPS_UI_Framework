@@ -45,10 +45,10 @@ namespace rpsui::render
         context_->IAGetPrimitiveTopology(&topology_);
         context_->IAGetVertexBuffers(
             0,
-            1,
-            vertexBuffer_.GetAddressOf(),
-            &vertexStride_,
-            &vertexOffset_);
+            kVertexBufferSlots,
+            vertexBuffers_.data(),
+            vertexStrides_.data(),
+            vertexOffsets_.data());
         context_->IAGetIndexBuffer(
             indexBuffer_.GetAddressOf(),
             &indexFormat_,
@@ -138,13 +138,18 @@ namespace rpsui::render
             depthStencil_);
         context_->IASetInputLayout(inputLayout_.Get());
         context_->IASetPrimitiveTopology(topology_);
-        auto* vertexBuffer = vertexBuffer_.Get();
         context_->IASetVertexBuffers(
             0,
-            1,
-            &vertexBuffer,
-            &vertexStride_,
-            &vertexOffset_);
+            kVertexBufferSlots,
+            vertexBuffers_.data(),
+            vertexStrides_.data(),
+            vertexOffsets_.data());
+        for (auto*& buffer : vertexBuffers_) {
+            if (buffer) {
+                buffer->Release();
+                buffer = nullptr;
+            }
+        }
         context_->IASetIndexBuffer(
             indexBuffer_.Get(),
             indexFormat_,
