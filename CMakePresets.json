@@ -8,9 +8,9 @@
       "architecture": { "value": "x64" },
       "toolset": "v143",
       "binaryDir": "${sourceDir}/build-fast",
-      "environment": { "VCPKG_ROOT": "C:/vcpkg" },
+      "environment": { "VCPKG_ROOT": "$penv{VCPKG_ROOT}" },
       "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "C:/vcpkg/scripts/buildsystems/vcpkg.cmake",
+        "CMAKE_TOOLCHAIN_FILE": "$penv{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
         "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>",
         "CMAKE_CXX_FLAGS": "/EHsc /MP /W4 /external:anglebrackets /external:W0 $penv{CXXFLAGS}",
         "VCPKG_TARGET_TRIPLET": "x64-windows-static",
