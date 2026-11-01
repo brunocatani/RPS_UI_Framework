@@ -2,6 +2,7 @@
 #include "RPSUINumberOverlayApi.h"
 #include <cassert>
 #include <limits>
+#include <utility>
 
 int main()
 {
@@ -20,8 +21,53 @@ int main()
     }
     assert(!layout(12,0,480).count);
     assert(!layout(12,1024,std::numeric_limits<float>::quiet_NaN()).count);
-    // New records do not append fields to, alias, or repurpose released V1 ABI.
+
+    // HUD layout: loaded over reserve, both right aligned to the divider's
+    // right end, every quad inside the panel, digits never overlapping.
+    using rpsui::number_overlay::hudLayout;
+    constexpr rpsui::number_overlay::HudAtlasMetrics atlas{0.2f,0.75f,0.45f};
+    for (const bool bracketed:{false,true}) {
+        for (const auto [top,bottom]:{std::pair<std::uint32_t,std::uint32_t>{0,0},{30,240},{8,4294967295u}}) {
+            const auto hud=hudLayout(top,bottom,bracketed,atlas,1024,480);
+            assert(hud.barCount==(bracketed ? 7u : 1u));
+            assert(hud.glyphCount>=2);
+            const auto& divider=hud.bars[0];
+            float firstBottomTop=-1;
+            for (std::size_t i=0;i<hud.glyphCount;++i) {
+                const auto& g=hud.glyphs[i];
+                assert(g.left>=0 && g.right<=1024 && g.top>=0 && g.bottom<=480);
+                assert(g.right>g.left && g.bottom>g.top && g.u0>=0 && g.u1<=1 && g.v0==atlas.inkTop && g.v1==atlas.inkBottom);
+                if (g.top>divider.bottom) {
+                    if (firstBottomTop<0) firstBottomTop=g.top;
+                } else {
+                    assert(g.bottom<divider.top);
+                }
+                if (i && hud.glyphs[i-1].top==g.top) assert(g.left>=hud.glyphs[i-1].right-0.001f);
+            }
+            assert(firstBottomTop>divider.bottom);
+            // Each row's last digit ends at the divider's right end.
+            float topRight=0,bottomRight=0;
+            for (std::size_t i=0;i<hud.glyphCount;++i) {
+                auto& rowRight=hud.glyphs[i].top<divider.top ? topRight : bottomRight;
+                rowRight=(std::max)(rowRight,hud.glyphs[i].right);
+            }
+            assert(std::abs(topRight-divider.right)<0.01f && std::abs(bottomRight-divider.right)<0.01f);
+            for (std::size_t i=0;i<hud.barCount;++i) {
+                const auto& b=hud.bars[i];
+                assert(b.left>=0 && b.right<=1024 && b.top>=0 && b.bottom<=480 && b.right>b.left && b.bottom>b.top);
+            }
+        }
+    }
+    assert(!hudLayout(1,2,false,atlas,0,480).glyphCount);
+    assert(!hudLayout(1,2,false,{0.5f,0.5f,0.45f},1024,480).glyphCount);
+
+    // The style fields follow the original record, so a caller built before
+    // them passes the base size and the host reads none of them.
     static_assert(sizeof(rpsui::sdk::NumberOverlayApiV1)==40);
     static_assert(offsetof(rpsui::sdk::NumberOverlayApiV1,registerOverlay)==16);
     static_assert(offsetof(rpsui::sdk::NumberOverlayPresentationV1,value)==72);
+    static_assert(rpsui::sdk::RPSUI_NUMBER_OVERLAY_PRESENTATION_BASE_SIZE==88);
+    static_assert(offsetof(rpsui::sdk::NumberOverlayPresentationV1,secondaryValue)==100);
+    static_assert(offsetof(rpsui::sdk::NumberOverlayPresentationV1,style)==104);
+    static_assert(sizeof(rpsui::sdk::NumberOverlayPresentationV1)==112);
 }

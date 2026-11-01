@@ -1,10 +1,25 @@
 #pragma once
 #include "RPSUIFrameworkApi.h"
 
+#include <cstddef>
+
 namespace rpsui::sdk
 {
     inline constexpr std::uint32_t RPSUI_NUMBER_OVERLAY_VERSION = 1;
     inline constexpr float RPSUI_NUMBER_OVERLAY_ASPECT = 1024.0f/480.0f;
+
+    // How the host lays out an overlay's numbers.
+    enum class NumberOverlayStyleV1 : std::uint8_t
+    {
+        // One value in the default face, centered. The original overlay.
+        Plain = 0,
+        // The Fallout HUD ammo counter: value over a divider over
+        // secondaryValue, right aligned, in a condensed bold face.
+        Hud = 1,
+        // Hud inside the HUD's bracket pair: a top bar with end ticks down and
+        // a bottom bar with end ticks up.
+        HudBracketed = 2,
+    };
 
     // Independently negotiated addition. Existing panel/input/cooperation V1
     // tables and records keep their contracts. Uses an existing consumer token.
@@ -22,10 +37,19 @@ namespace rpsui::sdk
         std::uint64_t sequence{};
         PanelPoseV1 pose{}; // Game units. Width/height must match the aspect above.
         std::uint32_t value{}; // Entire uint32 range, including zero; no leading padding.
-        float opacity{0.55f}; // Premultiplied white, 0..1; transparent background.
+        float opacity{0.55f}; // Premultiplied, 0..1; transparent background.
         std::uint8_t open{};
         std::uint8_t reserved[7]{};
+        // Style fields. A caller built before they existed passes a structSize
+        // that ends at reserved and gets white Plain digits.
+        float color[3]{1.0f,1.0f,1.0f}; // Digit and frame color, 0..1 each.
+        std::uint32_t secondaryValue{}; // Hud styles only: the number below the divider.
+        NumberOverlayStyleV1 style{NumberOverlayStyleV1::Plain};
+        std::uint8_t reservedStyle[3]{};
     };
+    // structSize of a caller that predates the style fields.
+    inline constexpr std::uint32_t RPSUI_NUMBER_OVERLAY_PRESENTATION_BASE_SIZE =
+        static_cast<std::uint32_t>(offsetof(NumberOverlayPresentationV1,color));
     struct NumberOverlayApiV1
     {
         std::uint32_t structSize{sizeof(NumberOverlayApiV1)};

@@ -50,6 +50,9 @@ namespace rpsui::render
             Microsoft::WRL::ComPtr<ID3D11DepthStencilState> worldDepthState;
             Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> digitAtlas;
             bool digitAtlasFailed{};
+            Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> hudAtlas;
+            number_overlay::HudAtlasMetrics hudMetrics{};
+            bool hudAtlasFailed{};
             std::unordered_map<std::uint64_t, PanelGpu> panelGpu;
             RenderPanelBatch panels;
             world_draw::RenderBatch world;
@@ -85,6 +88,8 @@ namespace rpsui::render
             state.worldDepthState.Reset();
             state.digitAtlas.Reset();
             state.digitAtlasFailed=false;
+            state.hudAtlas.Reset();
+            state.hudAtlasFailed=false;
             state.submittedRenderTarget.Reset();
             state.submittedTexture.Reset();
             state.isolatedContextState.Reset();
@@ -658,14 +663,95 @@ namespace rpsui::render
             return true;
         }
 
-        bool renderNumberPanel(Resources& state,const RenderPanelSnapshot& panel)
+        // The Fallout HUD digits: a condensed bold face standing in for the
+        // HUD's $MAIN_Font_Bold, which only the game's Scaleform fonts carry.
+        // Ink rows and the digit advance are measured from the drawn cells so
+        // layout can size quads to the real digit height.
+        bool ensureHudAtlas(Resources& state)
         {
-            const bool firstAttempt=!state.digitAtlasFailed;
-            if (!ensureDigitAtlas(state)) {
-                if (firstAttempt) log::error("Numeric overlay glyph atlas creation failed");
+            if (state.hudAtlas) return true;
+            if (state.hudAtlasFailed) return false;
+            state.hudAtlasFailed=true;
+            struct Canvas {
+                HDC dc{}; HBITMAP bitmap{}; HFONT font{}; HGDIOBJ oldBitmap{},oldFont{};
+                ~Canvas() {
+                    if (oldFont) SelectObject(dc,oldFont);
+                    if (oldBitmap) SelectObject(dc,oldBitmap);
+                    if (font) DeleteObject(font);
+                    if (bitmap) DeleteObject(bitmap);
+                    if (dc) DeleteDC(dc);
+                }
+            } canvas;
+            constexpr auto cellWidth=number_overlay::kHudGlyphWidth, height=number_overlay::kHudGlyphHeight;
+            constexpr auto width=cellWidth*number_overlay::kHudCellCount;
+            canvas.dc=CreateCompatibleDC(nullptr);
+            if (!canvas.dc) return false;
+            BITMAPINFO info{};
+            info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
+            info.bmiHeader.biWidth=width; info.bmiHeader.biHeight=-static_cast<LONG>(height);
+            info.bmiHeader.biPlanes=1; info.bmiHeader.biBitCount=32; info.bmiHeader.biCompression=BI_RGB;
+            void* pixels{};
+            canvas.bitmap=CreateDIBSection(canvas.dc,&info,DIB_RGB_COLORS,&pixels,nullptr,0);
+            canvas.font=CreateFontW(-176,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,
+                OUT_TT_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Bahnschrift SemiBold Condensed");
+            if (!canvas.bitmap || !canvas.font || !pixels) return false;
+            canvas.oldBitmap=SelectObject(canvas.dc,canvas.bitmap); canvas.oldFont=SelectObject(canvas.dc,canvas.font);
+            std::array<wchar_t,64> face{};
+            GetTextFaceW(canvas.dc,static_cast<int>(face.size()),face.data());
+            SIZE extent{};
+            if (!GetTextExtentPoint32W(canvas.dc,L"0",1,&extent) || extent.cx<=0 || extent.cx>static_cast<LONG>(cellWidth)) {
+                log::error("Numeric overlay HUD face '{}' digit advance {} does not fit its cell",
+                    std::filesystem::path(face.data()).string(),extent.cx);
                 return false;
             }
-            const auto layout=number_overlay::layout(panel.number,static_cast<float>(panel.pixelWidth),static_cast<float>(panel.pixelHeight));
+            std::memset(pixels,0,width*height*4);
+            SetBkColor(canvas.dc,RGB(0,0,0)); SetTextColor(canvas.dc,RGB(255,255,255));
+            for (unsigned i=0;i<number_overlay::kGlyphCount;++i) {
+                const wchar_t digit=static_cast<wchar_t>(L'0'+i);
+                RECT rect{static_cast<LONG>(i*cellWidth),0,static_cast<LONG>((i+1)*cellWidth),static_cast<LONG>(height)};
+                if (!DrawTextW(canvas.dc,&digit,1,&rect,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX)) return false;
+            }
+            GdiFlush();
+            auto* bytes=static_cast<std::uint8_t*>(pixels);
+            unsigned inkTop=height, inkBottom=0;
+            for (unsigned y=0;y<height;++y) {
+                for (unsigned x=0;x<cellWidth*number_overlay::kGlyphCount;++x) {
+                    const auto* pixel=bytes+(y*width+x)*4;
+                    const auto coverage=static_cast<std::uint8_t>((unsigned(pixel[0])+pixel[1]+pixel[2])/3);
+                    if (coverage>=128) { inkTop=(std::min)(inkTop,y); inkBottom=(std::max)(inkBottom,y+1); }
+                }
+            }
+            if (inkBottom<=inkTop) {
+                log::error("Numeric overlay HUD face '{}' drew no digits",std::filesystem::path(face.data()).string());
+                return false;
+            }
+            for (unsigned i=0;i<width*height;++i) {
+                const auto coverage=static_cast<std::uint8_t>((unsigned(bytes[i*4])+bytes[i*4+1]+bytes[i*4+2])/3);
+                bytes[i*4]=bytes[i*4+1]=bytes[i*4+2]=bytes[i*4+3]=coverage;
+            }
+            // The solid cell bars sample; a one-pixel clear border keeps linear
+            // filtering inside it from reaching the digit cells.
+            for (unsigned y=1;y+1<height;++y) {
+                for (unsigned x=cellWidth*number_overlay::kGlyphCount+1;x+1<width;++x) std::memset(bytes+(y*width+x)*4,255,4);
+            }
+            D3D11_TEXTURE2D_DESC desc{};
+            desc.Width=width; desc.Height=height; desc.MipLevels=1; desc.ArraySize=1;
+            desc.Format=DXGI_FORMAT_R8G8B8A8_UNORM; desc.SampleDesc.Count=1;
+            desc.Usage=D3D11_USAGE_IMMUTABLE; desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+            D3D11_SUBRESOURCE_DATA data{pixels,width*4,0};
+            Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+            if (FAILED(state.device->CreateTexture2D(&desc,&data,&texture)) ||
+                FAILED(state.device->CreateShaderResourceView(texture.Get(),nullptr,&state.hudAtlas))) return false;
+            state.hudMetrics={static_cast<float>(inkTop)/height,static_cast<float>(inkBottom)/height,
+                static_cast<float>(extent.cx)/cellWidth};
+            log::info("Numeric overlay HUD face '{}': digit rows {}..{} of {}, advance {} of {}",
+                std::filesystem::path(face.data()).string(),inkTop,inkBottom,height,extent.cx,cellWidth);
+            state.hudAtlasFailed=false;
+            return true;
+        }
+
+        void beginNumberPass(Resources& state,const RenderPanelSnapshot& panel,ID3D11ShaderResourceView* atlas)
+        {
             state.context->SetPredication(nullptr,FALSE);
             state.context->HSSetShader(nullptr,nullptr,0); state.context->DSSetShader(nullptr,nullptr,0); state.context->GSSetShader(nullptr,nullptr,0);
             state.context->IASetInputLayout(state.inputLayout.Get());
@@ -676,9 +762,56 @@ namespace rpsui::render
             state.effect->SetWorld(DirectX::XMMatrixIdentity()); state.effect->SetView(DirectX::XMMatrixIdentity());
             state.effect->SetProjection(DirectX::XMMatrixOrthographicOffCenterRH(0,static_cast<float>(panel.pixelWidth),
                 static_cast<float>(panel.pixelHeight),0,0,1));
-            state.effect->SetTexture(state.digitAtlas.Get()); state.effect->Apply(state.context.Get());
+            state.effect->SetTexture(atlas); state.effect->Apply(state.context.Get());
+        }
+
+        // Premultiplied: the atlas stores coverage in every channel.
+        DirectX::XMFLOAT4 numberColor(const RenderPanelSnapshot& panel)
+        {
             const auto opacity=panel.numberOpacity;
-            const DirectX::XMFLOAT4 color{opacity,opacity,opacity,opacity};
+            const auto& rgb=panel.numberLook.color;
+            return {rgb[0]*opacity,rgb[1]*opacity,rgb[2]*opacity,opacity};
+        }
+
+        bool renderHudNumberPanel(Resources& state,const RenderPanelSnapshot& panel)
+        {
+            const bool firstAttempt=!state.hudAtlasFailed;
+            if (!ensureHudAtlas(state)) {
+                if (firstAttempt) log::error("Numeric overlay HUD glyph atlas creation failed");
+                return false;
+            }
+            const auto layout=number_overlay::hudLayout(panel.number,panel.numberLook.secondaryValue,
+                panel.numberLook.style==sdk::NumberOverlayStyleV1::HudBracketed,state.hudMetrics,
+                static_cast<float>(panel.pixelWidth),static_cast<float>(panel.pixelHeight));
+            beginNumberPass(state,panel,state.hudAtlas.Get());
+            const auto color=numberColor(panel);
+            state.batch->Begin();
+            for (std::size_t i=0;i<layout.glyphCount;++i) {
+                const auto& g=layout.glyphs[i];
+                state.batch->DrawQuad(Vertex{{g.left,g.top,0},color,{g.u0,g.v0}},Vertex{{g.right,g.top,0},color,{g.u1,g.v0}},
+                    Vertex{{g.right,g.bottom,0},color,{g.u1,g.v1}},Vertex{{g.left,g.bottom,0},color,{g.u0,g.v1}});
+            }
+            constexpr DirectX::XMFLOAT2 solid{number_overlay::kHudSolidU,0.5f};
+            for (std::size_t i=0;i<layout.barCount;++i) {
+                const auto& b=layout.bars[i];
+                state.batch->DrawQuad(Vertex{{b.left,b.top,0},color,solid},Vertex{{b.right,b.top,0},color,solid},
+                    Vertex{{b.right,b.bottom,0},color,solid},Vertex{{b.left,b.bottom,0},color,solid});
+            }
+            state.batch->End(); state.effect->SetTexture(nullptr);
+            return true;
+        }
+
+        bool renderNumberPanel(Resources& state,const RenderPanelSnapshot& panel)
+        {
+            if (panel.numberLook.style!=sdk::NumberOverlayStyleV1::Plain) return renderHudNumberPanel(state,panel);
+            const bool firstAttempt=!state.digitAtlasFailed;
+            if (!ensureDigitAtlas(state)) {
+                if (firstAttempt) log::error("Numeric overlay glyph atlas creation failed");
+                return false;
+            }
+            const auto layout=number_overlay::layout(panel.number,static_cast<float>(panel.pixelWidth),static_cast<float>(panel.pixelHeight));
+            beginNumberPass(state,panel,state.digitAtlas.Get());
+            const auto color=numberColor(panel);
             state.batch->Begin();
             for (std::size_t i=0;i<layout.count;++i) {
                 const auto& g=layout.glyphs[i];

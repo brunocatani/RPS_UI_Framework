@@ -188,6 +188,7 @@ namespace rpsui
                 .numberOverlay = panel.numberOverlay,
                 .number = panel.number,
                 .numberOpacity = panel.numberOpacity,
+                .numberLook = panel.numberLook,
                 .pose = panel.pose,
                 .pointerHand = panel.input.hand,
                 .hoveredResizeHandle = panel.input.hovered,
@@ -533,9 +534,23 @@ namespace rpsui
         const sdk::NumberOverlayPresentationV1& presentation) noexcept
     {
         try {
-            if (presentation.structSize<sizeof(presentation)) return sdk::ResultV1::InvalidArgument;
+            if (presentation.structSize<sdk::RPSUI_NUMBER_OVERLAY_PRESENTATION_BASE_SIZE) return sdk::ResultV1::InvalidArgument;
             if (presentation.apiVersion!=sdk::RPSUI_NUMBER_OVERLAY_VERSION) return sdk::ResultV1::VersionMismatch;
             if (!std::isfinite(presentation.opacity) || presentation.opacity<0 || presentation.opacity>1) return sdk::ResultV1::InvalidArgument;
+            // A caller built before the style fields existed passes the base
+            // size; its record ends there, so none of them may be read.
+            NumberOverlayLook look{};
+            if (presentation.structSize>=sizeof(presentation)) {
+                for (std::size_t i=0;i<look.color.size();++i) {
+                    const float channel=presentation.color[i];
+                    if (!std::isfinite(channel) || channel<0 || channel>1) return sdk::ResultV1::InvalidArgument;
+                    look.color[i]=channel;
+                }
+                if (presentation.style!=sdk::NumberOverlayStyleV1::Plain && presentation.style!=sdk::NumberOverlayStyleV1::Hud &&
+                    presentation.style!=sdk::NumberOverlayStyleV1::HudBracketed) return sdk::ResultV1::InvalidArgument;
+                look.style=presentation.style;
+                look.secondaryValue=presentation.secondaryValue;
+            }
             std::scoped_lock lock(mutex_);
             auto* panel=findPanelLocked(handle);
             if (!panel) return sdk::ResultV1::PanelNotRegistered;
@@ -551,7 +566,7 @@ namespace rpsui
                 if (pointerPanelHandle_ == handle || activeResize_.panelHandle == handle)
                     clearPointerStateLocked();
             }
-            panel->number=presentation.value; panel->numberOpacity=presentation.opacity;
+            panel->number=presentation.value; panel->numberOpacity=presentation.opacity; panel->numberLook=look;
             panel->submittedSequence=presentation.sequence ? presentation.sequence : panel->submittedSequence+1;
             ++panel->stateSequence;
             updateDepthRequestLocked();

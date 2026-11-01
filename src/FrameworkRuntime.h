@@ -24,6 +24,14 @@
 
 namespace rpsui
 {
+    // A number overlay's style fields, copied from its last presentation.
+    struct NumberOverlayLook
+    {
+        std::array<float, 3> color{ 1.0f, 1.0f, 1.0f };
+        std::uint32_t secondaryValue{ 0 };
+        rpsui::sdk::NumberOverlayStyleV1 style{ rpsui::sdk::NumberOverlayStyleV1::Plain };
+    };
+
     struct RenderPanelSnapshot
     {
         std::uint64_t panelHandle{ 0 };
@@ -37,6 +45,7 @@ namespace rpsui
         bool numberOverlay{};
         std::uint32_t number{};
         float numberOpacity{0.55f};
+        NumberOverlayLook numberLook{};
         rpsui::sdk::PanelPoseV1 pose{};
         rpsui::sdk::PhysicalHandV1 pointerHand{
             rpsui::sdk::PhysicalHandV1::None
@@ -186,6 +195,7 @@ namespace rpsui
             bool numberOverlay{}, passive{}, focusedInput{};
             std::uint32_t number{};
             float numberOpacity{0.55f};
+            NumberOverlayLook numberLook{};
             rpsui::sdk::PanelRenderCallbackV1 renderCallback{ nullptr };
             void* userData{ nullptr };
             std::shared_ptr<PanelCallbackGate> callbackGate;
