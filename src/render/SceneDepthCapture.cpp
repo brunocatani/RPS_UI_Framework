@@ -159,11 +159,18 @@ namespace rpsui::render::SceneDepthCapture
                        rightIdentity.Get();
         }
 
+        // Reads the scene target tables every presented frame. An SEH-guarded
+        // copy costs nothing on success; ReadProcessMemory on our own process
+        // is a kernel call per pointer hop.
         bool ReadNative(std::uintptr_t address, void* destination, std::size_t size) noexcept
         {
-            SIZE_T copied = 0;
-            return ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(address),
-                destination, size, &copied) && copied == size;
+            if (address == 0 || !destination || size == 0) return false;
+            __try {
+                std::memcpy(destination, reinterpret_cast<const void*>(address), size);
+                return true;
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+                return false;
+            }
         }
 
         bool IsTrueScopesCode(std::uintptr_t address) noexcept

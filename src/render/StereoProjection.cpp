@@ -69,18 +69,15 @@ namespace rpsui::render::StereoProjection
                 error = ERROR_INVALID_ADDRESS;
                 return false;
             }
-            SIZE_T bytesRead = 0;
-            if (!ReadProcessMemory(
-                    GetCurrentProcess(),
-                    reinterpret_cast<const void*>(address),
+            // Runs every presented frame. An SEH-guarded copy costs nothing on
+            // success; ReadProcessMemory on our own process is a kernel call.
+            __try {
+                std::memcpy(
                     destination,
-                    size,
-                    &bytesRead) ||
-                bytesRead != size) {
-                error = GetLastError();
-                if (error == ERROR_SUCCESS) {
-                    error = ERROR_PARTIAL_COPY;
-                }
+                    reinterpret_cast<const void*>(address),
+                    size);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+                error = ERROR_NOACCESS;
                 return false;
             }
             error = ERROR_SUCCESS;
