@@ -7,9 +7,10 @@ a mod lists it as a requirement; individual mods supply their menus.
 
 ## For developers
 
-The public UI API is available in the
-[RPS SDK](https://github.com/brunocatani/RPS_SDK/tree/main/SDK/UI).
-Read the [DevArtificial documentation](https://devartificial.pro/docs/rps-sdk/ui)
+The public UI API headers are in this repository's [SDK/include/](SDK/include/).
+Add that folder to your include path through a CMake cache variable such as
+`RPSUI_INCLUDE_DIR`; never copy the headers into your project. Read the
+[DevArtificial documentation](https://devartificial.pro/docs/apis/ui)
 for setup, API reference, and integration guides.
 
 ## Credits
