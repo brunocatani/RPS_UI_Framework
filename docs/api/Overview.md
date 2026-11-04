@@ -59,6 +59,6 @@ The pre-2.0 exports (`RPSUI_RequestApi` and the other `RPSUI_Request*` functions
 
 ## Records and results
 
-Every record a consumer passes in starts with `size` and `version`. Both are initialized by the record's default member initializers, so start from a value-initialized record and set only the fields you need. A record that is too small is rejected with `InvalidArgument`, and one with another `version` with `VersionMismatch`.
+Every record a consumer passes in starts with `size` and `version`. Both are initialized by the record's default member initializers, so start from a value-initialized record and set only the fields you need. A record that is too small is rejected with `InvalidArgument`. A record with another `version` is rejected with `VersionMismatch`, or with `InvalidArgument` on the Framework interface's registration and presentation calls.
 
 Functions return `rpsui::api::Result`, listed in `Abi.h`, unless the table documents a `bool` or integer return.
