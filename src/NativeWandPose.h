@@ -1,6 +1,6 @@
 #pragma once
 
-#include "RPSUIInputApi.h"
+#include <RPS_UI_Framework/Input.h>
 #include <cmath>
 #include <array>
 
@@ -18,7 +18,7 @@ inline std::array<float,3> pointerAimDirection(float pitchDegrees,float yawDegre
  return {std::sin(yaw)*std::cos(pitch),std::cos(yaw)*std::cos(pitch),std::sin(pitch)};
 }
 template<class Transform>
-bool nativeWandPose(const Transform& transform, sdk::HandInputV1& hand,const std::array<float,3>& aim={0,1,0}) noexcept {
+bool nativeWandPose(const Transform& transform, api::input::HandInput& hand,const std::array<float,3>& aim={0,1,0}) noexcept {
  if(!std::isfinite(transform.scale) || transform.scale<=0 || transform.scale>100)return false;
  for(unsigned axis=0;axis<3;++axis) {
   hand.position[axis]=transform.translate[axis];

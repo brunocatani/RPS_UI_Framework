@@ -2,10 +2,12 @@ LIBRARY "RPS_UI_Framework"
 EXPORTS
     F4SEPlugin_Query
     F4SEPlugin_Load
+    RPSUI_QueryInterfaceV1
     RPSUI_RequestApi
     RPSUI_RequestCooperationApi
     RPSUI_RequestInputApi
     RPSUI_RequestNumberOverlayApi
+    RPSUI_RequestPassivePanelApi
     RPSUI_RequestWorldDrawApi
     RPSUI_RequestRegistryApi
     RPSUI_RequestFocusedPanelApi

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "PanelCooperation.h"
-#include "RPSUIWorldDrawApi.h"
+#include <RPS_UI_Framework/WorldDraw.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -48,15 +48,15 @@ namespace rpsui::world_draw
         std::uint32_t mesh{ 0 }; // Index into RenderBatch::meshes.
         float transform[16]{};
         float color[4]{};
-        sdk::WorldFillV1 fill{ sdk::WorldFillV1::Wire };
+        api::world_draw::Fill fill{ api::world_draw::Fill::Wire };
     };
 
     // Reused by the renderer; vectors keep their capacity between frames.
     struct RenderBatch
     {
-        std::vector<sdk::WorldSphereV1> spheres;
-        std::vector<sdk::WorldLineV1> lines;
-        std::vector<sdk::WorldTextV1> texts;
+        std::vector<api::world_draw::Sphere> spheres;
+        std::vector<api::world_draw::Line> lines;
+        std::vector<api::world_draw::Text> texts;
         std::vector<DrawInstance> instances;
         std::vector<MeshRef> meshes;
         std::unordered_map<MeshKey, std::uint32_t, MeshKeyHash> meshIndex;
@@ -76,20 +76,20 @@ namespace rpsui::world_draw
         void removeOwner(std::uint64_t owner) noexcept;
         [[nodiscard]] bool hasFrameCallback(std::uint64_t owner) const noexcept;
 
-        [[nodiscard]] sdk::ResultV1 setFrameCallback(std::uint64_t owner,
-            sdk::WorldDrawFrameCallbackV1 callback, void* context) noexcept;
+        [[nodiscard]] api::Result setFrameCallback(std::uint64_t owner,
+            api::world_draw::FrameCallback callback, void* context) noexcept;
         // Render thread, before the frame counter advances to frame. Calls every
         // open owner's callback without holding the store lock, so callbacks may
         // submit.
         void runFrameCallbacks(std::uint64_t frame) noexcept;
 
         // frame is the renderer frame counter when the call is made.
-        [[nodiscard]] sdk::ResultV1 submit(std::uint64_t owner,
-            const sdk::WorldDrawPublicationV1& publication, std::uint64_t frame) noexcept;
-        [[nodiscard]] sdk::ResultV1 clear(std::uint64_t owner) noexcept;
-        [[nodiscard]] sdk::ResultV1 registerMesh(std::uint64_t owner, std::uint64_t meshId,
-            const sdk::WorldMeshV1& mesh) noexcept;
-        [[nodiscard]] sdk::ResultV1 releaseMesh(std::uint64_t owner, std::uint64_t meshId) noexcept;
+        [[nodiscard]] api::Result submit(std::uint64_t owner,
+            const api::world_draw::Publication& publication, std::uint64_t frame) noexcept;
+        [[nodiscard]] api::Result clear(std::uint64_t owner) noexcept;
+        [[nodiscard]] api::Result registerMesh(std::uint64_t owner, std::uint64_t meshId,
+            const api::world_draw::Mesh& mesh) noexcept;
+        [[nodiscard]] api::Result releaseMesh(std::uint64_t owner, std::uint64_t meshId) noexcept;
 
         // Fills out with every publication still leased at frame. Returns false
         // when there is nothing to draw or the copy failed.
@@ -98,7 +98,7 @@ namespace rpsui::world_draw
     private:
         struct FrameCallback
         {
-            sdk::WorldDrawFrameCallbackV1 callback{ nullptr };
+            api::world_draw::FrameCallback callback{ nullptr };
             void* context{ nullptr };
             std::shared_ptr<PanelCallbackGate> gate;
         };
@@ -110,10 +110,10 @@ namespace rpsui::world_draw
             FrameCallback frameCallback;
             std::uint64_t expiresAfterFrame{ 0 };
             bool published{ false };
-            std::vector<sdk::WorldSphereV1> spheres;
-            std::vector<sdk::WorldLineV1> lines;
-            std::vector<sdk::WorldTextV1> texts;
-            std::vector<sdk::WorldMeshInstanceV1> meshInstances;
+            std::vector<api::world_draw::Sphere> spheres;
+            std::vector<api::world_draw::Line> lines;
+            std::vector<api::world_draw::Text> texts;
+            std::vector<api::world_draw::MeshInstance> meshInstances;
             std::unordered_map<std::uint64_t, std::shared_ptr<const MeshGeometry>> meshes;
             std::uint64_t meshBytes{ 0 };
         };

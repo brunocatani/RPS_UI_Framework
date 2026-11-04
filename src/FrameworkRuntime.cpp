@@ -19,16 +19,6 @@ namespace rpsui
         constexpr std::uint32_t kFaceButton =
             static_cast<std::uint32_t>(f4cf::vrcf::k_EButton_A);
         constexpr float kPointerMaximumDistance = 500.0f;
-        constexpr std::uint64_t kAllFeatures =
-            rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::MultipleWorldPanels) |
-            rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::SceneDepthOcclusion) |
-            rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::CentralPointerRouting) |
-            rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::ContextualTwoAxisScroll) |
-            rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::PhysicalPanelResize) |
-            rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::ConsumerRenderCallbacks) |
-            rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::SharedStereoComposition) |
-            rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::ShapedPanels) |
-            rpsui::sdk::featureMask(rpsui::sdk::FeatureV1::ConfigNavigation);
 
         [[nodiscard]] constexpr std::size_t handIndex(pointer_hand_selection::Hand hand) noexcept
         {
@@ -40,16 +30,16 @@ namespace rpsui
             return index == 0 ? pointer_hand_selection::Hand::Left : pointer_hand_selection::Hand::Right;
         }
 
-        [[nodiscard]] constexpr rpsui::sdk::PhysicalHandV1 sdkHand(
+        [[nodiscard]] constexpr rpsui::api::framework::PhysicalHand sdkHand(
             pointer_hand_selection::Hand hand) noexcept
         {
             if (hand == pointer_hand_selection::Hand::Left) {
-                return rpsui::sdk::PhysicalHandV1::Left;
+                return rpsui::api::framework::PhysicalHand::Left;
             }
             if (hand == pointer_hand_selection::Hand::Right) {
-                return rpsui::sdk::PhysicalHandV1::Right;
+                return rpsui::api::framework::PhysicalHand::Right;
             }
-            return rpsui::sdk::PhysicalHandV1::None;
+            return rpsui::api::framework::PhysicalHand::None;
         }
 
         [[nodiscard]] constexpr std::uint8_t suppressionBit(
@@ -97,15 +87,15 @@ namespace rpsui
             return dot3(crossUpFront, right);
         }
 
-        [[nodiscard]] rpsui::sdk::ResizeHandleV1 sdkResizeHandle(
+        [[nodiscard]] rpsui::api::framework::ResizeHandle sdkResizeHandle(
             panel_resize::Handle handle) noexcept
         {
-            return static_cast<rpsui::sdk::ResizeHandleV1>(
+            return static_cast<rpsui::api::framework::ResizeHandle>(
                 static_cast<std::uint32_t>(handle));
         }
 
         [[nodiscard]] pointer_panel_intersection::Panel intersectionPanel(
-            const rpsui::sdk::PanelPoseV1& pose) noexcept
+            const rpsui::api::framework::PanelPose& pose) noexcept
         {
             return {
                 .center = { pose.center[0], pose.center[1], pose.center[2] },
@@ -149,7 +139,7 @@ namespace rpsui
         rendererReady_.store(ready, std::memory_order_release);
     }
 
-    void FrameworkRuntime::setHookStatus(sdk::HookStatusV1 status) noexcept
+    void FrameworkRuntime::setHookStatus(api::cooperation::HookStatus status) noexcept
     {
         hookStatus_.store(status, std::memory_order_release);
     }
@@ -244,15 +234,15 @@ namespace rpsui
         return panel && panel->ownerToken == ownerToken;
     }
 
-    rpsui::sdk::ResultV1 FrameworkRuntime::registerConsumer(
-        const rpsui::sdk::ConsumerRegistrationV1& registration,
-        rpsui::sdk::ConsumerHandleV1& outHandle) noexcept
+    rpsui::api::Result FrameworkRuntime::registerConsumer(
+        const rpsui::api::framework::ConsumerRegistration& registration,
+        rpsui::api::framework::ConsumerHandle& outHandle) noexcept
     {
         try {
             outHandle = {};
-            if (registration.structSize < sizeof(registration) ||
-                registration.apiVersion != rpsui::sdk::RPSUI_API_VERSION) {
-                return rpsui::sdk::ResultV1::InvalidArgument;
+            if (registration.size < sizeof(registration) ||
+                registration.version != rpsui::api::kRecordVersion) {
+                return rpsui::api::Result::InvalidArgument;
             }
             const auto consumerId = boundedString(
                 registration.consumerId,
@@ -262,12 +252,12 @@ namespace rpsui
                 sizeof(registration.displayName));
             if (consumerId.empty() ||
                 displayName.empty()) {
-                return rpsui::sdk::ResultV1::InvalidArgument;
+                return rpsui::api::Result::InvalidArgument;
             }
 
             std::scoped_lock lock(mutex_);
             if (consumers_.size() >= kConsumerCapacity) {
-                return rpsui::sdk::ResultV1::CapacityReached;
+                return rpsui::api::Result::CapacityReached;
             }
             if (std::any_of(
                     consumers_.begin(),
@@ -275,41 +265,37 @@ namespace rpsui
                     [&](const ConsumerRecord& consumer) {
                         return consumer.consumerId == consumerId;
                     })) {
-                return rpsui::sdk::ResultV1::InvalidArgument;
+                return rpsui::api::Result::InvalidArgument;
             }
 
             const std::uint64_t token = nextOwnerToken_++;
-            const std::uint64_t granted =
-                registration.requestedFeatures & kAllFeatures;
             consumers_.push_back({
                 .ownerToken = token,
                 .consumerId = consumerId,
                 .displayName = displayName,
-                .grantedFeatures = granted,
             });
             ++registryRevision_;
             // Lock order: runtime, then world-draw store. The store never calls back.
             world_draw::store().addOwner(token);
             outHandle.ownerToken = token;
-            outHandle.grantedFeatures = granted;
             log::info(
                 "Registered UI consumer '{}' as owner {}",
                 consumerId,
                 token);
-            return rpsui::sdk::ResultV1::Ok;
+            return rpsui::api::Result::Ok;
         } catch (...) {
-            return rpsui::sdk::ResultV1::InternalError;
+            return rpsui::api::Result::InternalError;
         }
     }
 
-    rpsui::sdk::ResultV1 FrameworkRuntime::unregisterConsumer(
+    rpsui::api::Result FrameworkRuntime::unregisterConsumer(
         std::uint64_t ownerToken) noexcept
     { return unregisterConsumerImpl(ownerToken, false); }
 
-    sdk::ResultV1 FrameworkRuntime::unregisterConsumerSafely(std::uint64_t ownerToken) noexcept
+    api::Result FrameworkRuntime::unregisterConsumerSafely(std::uint64_t ownerToken) noexcept
     { return unregisterConsumerImpl(ownerToken, true); }
 
-    sdk::ResultV1 FrameworkRuntime::unregisterConsumerImpl(std::uint64_t ownerToken, bool drain) noexcept
+    api::Result FrameworkRuntime::unregisterConsumerImpl(std::uint64_t ownerToken, bool drain) noexcept
     {
         try {
             std::scoped_lock lock(mutex_);
@@ -320,11 +306,11 @@ namespace rpsui
                     return entry.ownerToken == ownerToken;
                 });
             if (consumer == consumers_.end()) {
-                return rpsui::sdk::ResultV1::OwnerNotRegistered;
+                return rpsui::api::Result::OwnerNotRegistered;
             }
 
             // Cooperative panels and world-draw frame callbacks cannot bypass
-            // safe retirement through V1.
+            // safe retirement through the plain Framework call.
             drain = drain || consumer->closing || world_draw::store().hasFrameCallback(ownerToken) ||
                 std::any_of(panels_.begin(), panels_.end(),
                 [ownerToken](const PanelRecord& panel) {
@@ -346,7 +332,7 @@ namespace rpsui
             }
             if (ownedInteraction) clearPointerStateLocked();
             updateDepthRequestLocked();
-            if (drain && !drained) return sdk::ResultV1::CallbackBusy;
+            if (drain && !drained) return api::Result::CallbackBusy;
 
             panels_.erase(
                 std::remove_if(
@@ -360,27 +346,27 @@ namespace rpsui
             world_draw::store().removeOwner(ownerToken);
             rebuildOpenPanelsLocked();
             ++registryRevision_;
-            return rpsui::sdk::ResultV1::Ok;
+            return rpsui::api::Result::Ok;
         } catch (...) {
-            return rpsui::sdk::ResultV1::InternalError;
+            return rpsui::api::Result::InternalError;
         }
     }
 
-    rpsui::sdk::ResultV1 FrameworkRuntime::registerPanel(
+    rpsui::api::Result FrameworkRuntime::registerPanel(
         std::uint64_t ownerToken,
-        const rpsui::sdk::PanelRegistrationV1& registration,
+        const rpsui::api::framework::PanelRegistration& registration,
         std::uint64_t& outPanelHandle) noexcept
     { return registerPanelImpl(ownerToken, registration, outPanelHandle, false); }
 
-    sdk::ResultV1 FrameworkRuntime::registerPanelImpl(std::uint64_t ownerToken,
-        const sdk::PanelRegistrationV1& registration, std::uint64_t& outPanelHandle, bool cooperative,
-        sdk::PanelAgreementV1* agreement, bool numberOverlay, bool passive, bool focusedInput) noexcept
+    api::Result FrameworkRuntime::registerPanelImpl(std::uint64_t ownerToken,
+        const api::framework::PanelRegistration& registration, std::uint64_t& outPanelHandle, bool cooperative,
+        api::cooperation::PanelAgreement* agreement, bool numberOverlay, bool passive, bool focusedInput) noexcept
     {
         try {
             outPanelHandle = 0;
-            if (registration.structSize < sizeof(registration) ||
-                registration.apiVersion != rpsui::sdk::RPSUI_API_VERSION) {
-                return rpsui::sdk::ResultV1::InvalidArgument;
+            if (registration.size < sizeof(registration) ||
+                registration.version != rpsui::api::kRecordVersion) {
+                return rpsui::api::Result::InvalidArgument;
             }
             const auto panelId = boundedString(
                 registration.panelId,
@@ -410,18 +396,18 @@ namespace rpsui
                 !widthsValid ||
                 (registration.flags & ~15u) != 0 ||
                 (!registration.renderCallback && !numberOverlay)) {
-                return rpsui::sdk::ResultV1::InvalidArgument;
+                return rpsui::api::Result::InvalidArgument;
             }
 
             std::scoped_lock lock(mutex_);
             if (!hasConsumerLocked(ownerToken)) {
-                return rpsui::sdk::ResultV1::OwnerNotRegistered;
+                return rpsui::api::Result::OwnerNotRegistered;
             }
             if (std::any_of(consumers_.begin(), consumers_.end(), [ownerToken](const ConsumerRecord& consumer) {
                 return consumer.ownerToken == ownerToken && consumer.closing;
-            })) return sdk::ResultV1::PanelClosing;
+            })) return api::Result::PanelClosing;
             if (panels_.size() >= kPanelCapacity) {
-                return rpsui::sdk::ResultV1::CapacityReached;
+                return rpsui::api::Result::CapacityReached;
             }
             const auto existing = std::find_if(
                     panels_.begin(),
@@ -431,14 +417,14 @@ namespace rpsui
                     });
             if (existing != panels_.end()) {
                 if (agreement) {
-                    agreement->conflictingAccess = sdk::RPSUI_PANEL_ACCESS;
+                    agreement->conflictingAccess = api::cooperation::kPanelAccess;
                     const auto owner = std::find_if(consumers_.begin(), consumers_.end(),
                         [&](const ConsumerRecord& consumer) { return consumer.ownerToken == existing->ownerToken; });
                     if (owner != consumers_.end())
                         std::memcpy(agreement->conflictOwnerId, owner->consumerId.c_str(), owner->consumerId.size() + 1);
-                    return sdk::ResultV1::ResourceConflict;
+                    return api::Result::ResourceConflict;
                 }
-                return rpsui::sdk::ResultV1::InvalidArgument;
+                return rpsui::api::Result::InvalidArgument;
             }
 
             const std::uint64_t handle = nextPanelHandle_++;
@@ -476,89 +462,85 @@ namespace rpsui
                 panelId,
                 handle,
                 ownerToken);
-            return rpsui::sdk::ResultV1::Ok;
+            return rpsui::api::Result::Ok;
         } catch (...) {
-            return rpsui::sdk::ResultV1::InternalError;
+            return rpsui::api::Result::InternalError;
         }
     }
 
-    sdk::ResultV1 FrameworkRuntime::registerCooperativePanel(std::uint64_t ownerToken,
-        const sdk::CooperativePanelRegistrationV1& registration, sdk::PanelAgreementV1& agreement) noexcept
+    api::Result FrameworkRuntime::registerCooperativePanel(std::uint64_t ownerToken,
+        const api::cooperation::PanelRegistration& registration, api::cooperation::PanelAgreement& agreement) noexcept
     {
         const auto valid = validatePanelContract(registration, agreement);
-        if (valid != sdk::ResultV1::Ok) return valid;
+        if (valid != api::Result::Ok) return valid;
         const auto result = registerPanelImpl(ownerToken, registration.panel, agreement.panelHandle, true, &agreement);
-        if (result == sdk::ResultV1::Ok) agreement.grantedAccess = sdk::RPSUI_PANEL_ACCESS;
+        if (result == api::Result::Ok) agreement.grantedAccess = api::cooperation::kPanelAccess;
         return result;
     }
 
-    sdk::ResultV1 FrameworkRuntime::registerFocusedPanel(std::uint64_t owner,
-        const sdk::PanelRegistrationV1& registration, std::uint64_t& handle) noexcept
+    api::Result FrameworkRuntime::registerFocusedPanel(std::uint64_t owner,
+        const api::framework::PanelRegistration& registration, std::uint64_t& handle) noexcept
     {
         handle = 0;
-        if (registration.structSize < sizeof(registration)) return sdk::ResultV1::InvalidArgument;
-        if (registration.apiVersion != sdk::RPSUI_API_VERSION) return sdk::ResultV1::VersionMismatch;
-        if (!sdk::hasPanelFlag(registration.flags, sdk::PanelFlagV1::FixedSize))
-            return sdk::ResultV1::InvalidArgument;
+        if (registration.size < sizeof(registration)) return api::Result::InvalidArgument;
+        if (registration.version != api::kRecordVersion) return api::Result::VersionMismatch;
+        if (!api::framework::hasPanelFlag(registration.flags, api::framework::PanelFlag::FixedSize))
+            return api::Result::InvalidArgument;
         return registerPanelImpl(owner, registration, handle, true, nullptr, false, false, true);
     }
 
-    sdk::ResultV1 FrameworkRuntime::registerPassivePanel(std::uint64_t owner,
-        const sdk::PanelRegistrationV1& registration, std::uint64_t& handle) noexcept
+    api::Result FrameworkRuntime::registerPassivePanel(std::uint64_t owner,
+        const api::framework::PanelRegistration& registration, std::uint64_t& handle) noexcept
     {
         handle = 0;
-        if (registration.structSize < sizeof(registration)) return sdk::ResultV1::InvalidArgument;
-        if (registration.apiVersion != sdk::RPSUI_API_VERSION) return sdk::ResultV1::VersionMismatch;
-        constexpr auto required = static_cast<unsigned>(sdk::PanelFlagV1::Transparent) |
-            static_cast<unsigned>(sdk::PanelFlagV1::FixedSize);
-        if (registration.flags != required || !registration.renderCallback) return sdk::ResultV1::InvalidArgument;
+        if (registration.size < sizeof(registration)) return api::Result::InvalidArgument;
+        if (registration.version != api::kRecordVersion) return api::Result::VersionMismatch;
+        constexpr auto required = static_cast<unsigned>(api::framework::PanelFlag::Transparent) |
+            static_cast<unsigned>(api::framework::PanelFlag::FixedSize);
+        if (registration.flags != required || !registration.renderCallback) return api::Result::InvalidArgument;
         return registerPanelImpl(owner, registration, handle, false, nullptr, false, true);
     }
 
-    sdk::ResultV1 FrameworkRuntime::registerNumberOverlay(std::uint64_t owner,
-        const sdk::NumberOverlayRegistrationV1& registration,std::uint64_t& handle) noexcept
+    api::Result FrameworkRuntime::registerNumberOverlay(std::uint64_t owner,
+        const api::number_overlay::Registration& registration,std::uint64_t& handle) noexcept
     {
         handle=0;
-        if (registration.structSize<sizeof(registration)) return sdk::ResultV1::InvalidArgument;
-        if (registration.apiVersion!=sdk::RPSUI_NUMBER_OVERLAY_VERSION) return sdk::ResultV1::VersionMismatch;
-        sdk::PanelRegistrationV1 panel;
+        if (registration.size<sizeof(registration)) return api::Result::InvalidArgument;
+        if (registration.version!=api::kRecordVersion) return api::Result::VersionMismatch;
+        api::framework::PanelRegistration panel;
         std::memcpy(panel.panelId,registration.overlayId,sizeof(panel.panelId));
         std::memcpy(panel.displayName,registration.displayName,sizeof(panel.displayName));
         panel.pixelWidth=1024; panel.pixelHeight=480;
         panel.defaultPhysicalWidth=3.0f; panel.minimumPhysicalWidth=0.1f; panel.maximumPhysicalWidth=100.0f;
-        panel.flags=static_cast<std::uint32_t>(sdk::PanelFlagV1::Transparent) | static_cast<std::uint32_t>(sdk::PanelFlagV1::FixedSize);
+        panel.flags=static_cast<std::uint32_t>(api::framework::PanelFlag::Transparent) | static_cast<std::uint32_t>(api::framework::PanelFlag::FixedSize);
         return registerPanelImpl(owner,panel,handle,false,nullptr,true);
     }
 
-    sdk::ResultV1 FrameworkRuntime::submitNumberOverlay(std::uint64_t owner,std::uint64_t handle,
-        const sdk::NumberOverlayPresentationV1& presentation) noexcept
+    api::Result FrameworkRuntime::submitNumberOverlay(std::uint64_t owner,std::uint64_t handle,
+        const api::number_overlay::Presentation& presentation) noexcept
     {
         try {
-            if (presentation.structSize<sdk::RPSUI_NUMBER_OVERLAY_PRESENTATION_BASE_SIZE) return sdk::ResultV1::InvalidArgument;
-            if (presentation.apiVersion!=sdk::RPSUI_NUMBER_OVERLAY_VERSION) return sdk::ResultV1::VersionMismatch;
-            if (!std::isfinite(presentation.opacity) || presentation.opacity<0 || presentation.opacity>1) return sdk::ResultV1::InvalidArgument;
-            // A caller built before the style fields existed passes the base
-            // size; its record ends there, so none of them may be read.
+            if (presentation.size<sizeof(presentation)) return api::Result::InvalidArgument;
+            if (presentation.version!=api::kRecordVersion) return api::Result::VersionMismatch;
+            if (!std::isfinite(presentation.opacity) || presentation.opacity<0 || presentation.opacity>1) return api::Result::InvalidArgument;
             NumberOverlayLook look{};
-            if (presentation.structSize>=sizeof(presentation)) {
-                for (std::size_t i=0;i<look.color.size();++i) {
-                    const float channel=presentation.color[i];
-                    if (!std::isfinite(channel) || channel<0 || channel>1) return sdk::ResultV1::InvalidArgument;
-                    look.color[i]=channel;
-                }
-                if (presentation.style!=sdk::NumberOverlayStyleV1::Plain && presentation.style!=sdk::NumberOverlayStyleV1::Hud &&
-                    presentation.style!=sdk::NumberOverlayStyleV1::HudBracketed) return sdk::ResultV1::InvalidArgument;
-                look.style=presentation.style;
-                look.secondaryValue=presentation.secondaryValue;
+            for (std::size_t i=0;i<look.color.size();++i) {
+                const float channel=presentation.color[i];
+                if (!std::isfinite(channel) || channel<0 || channel>1) return api::Result::InvalidArgument;
+                look.color[i]=channel;
             }
+            if (presentation.style!=api::number_overlay::Style::Plain && presentation.style!=api::number_overlay::Style::Hud &&
+                presentation.style!=api::number_overlay::Style::HudBracketed) return api::Result::InvalidArgument;
+            look.style=presentation.style;
+            look.secondaryValue=presentation.secondaryValue;
             std::scoped_lock lock(mutex_);
             auto* panel=findPanelLocked(handle);
-            if (!panel) return sdk::ResultV1::PanelNotRegistered;
-            if (panel->ownerToken!=owner) return sdk::ResultV1::OwnershipMismatch;
-            if (!panel->numberOverlay) return sdk::ResultV1::InvalidArgument;
-            if (panel->closing) return sdk::ResultV1::PanelClosing;
-            if (presentation.sequence && presentation.sequence<=panel->submittedSequence) return sdk::ResultV1::InvalidArgument;
-            if (presentation.open && !validatePose(presentation.pose,*panel)) return sdk::ResultV1::InvalidPose;
+            if (!panel) return api::Result::PanelNotRegistered;
+            if (panel->ownerToken!=owner) return api::Result::OwnershipMismatch;
+            if (!panel->numberOverlay) return api::Result::InvalidArgument;
+            if (panel->closing) return api::Result::PanelClosing;
+            if (presentation.sequence && presentation.sequence<=panel->submittedSequence) return api::Result::InvalidArgument;
+            if (presentation.open && !validatePose(presentation.pose,*panel)) return api::Result::InvalidPose;
             setPanelOpenLocked(*panel, presentation.open != 0);
             if (panel->open) panel->pose=presentation.pose;
             else {
@@ -570,11 +552,11 @@ namespace rpsui
             panel->submittedSequence=presentation.sequence ? presentation.sequence : panel->submittedSequence+1;
             ++panel->stateSequence;
             updateDepthRequestLocked();
-            return sdk::ResultV1::Ok;
-        } catch (...) { return sdk::ResultV1::InternalError; }
+            return api::Result::Ok;
+        } catch (...) { return api::Result::InternalError; }
     }
 
-    sdk::ResultV1 FrameworkRuntime::getCooperationSnapshot(sdk::CooperationSnapshotV1& out) const noexcept
+    api::Result FrameworkRuntime::getCooperationSnapshot(api::cooperation::Snapshot& out) const noexcept
     {
         try {
             out = {};
@@ -585,15 +567,14 @@ namespace rpsui
             out.focusedPanelHandle = pointerPanelHandle_;
             out.resizingPanelHandle = activeResize_.active ? activeResize_.panelHandle : 0;
             for (const auto& consumer : consumers_) {
-                if (out.consumerCount >= sdk::RPSUI_MAX_CONSUMERS) break;
+                if (out.consumerCount >= api::cooperation::kSnapshotConsumers) break;
                 auto& entry = out.consumers[out.consumerCount++];
                 entry.ownerToken = consumer.ownerToken;
-                entry.grantedFeatures = consumer.grantedFeatures;
                 std::memcpy(entry.consumerId, consumer.consumerId.c_str(), consumer.consumerId.size() + 1);
                 std::memcpy(entry.displayName, consumer.displayName.c_str(), consumer.displayName.size() + 1);
             }
             for (const auto& panel : panels_) {
-                if (out.panelCount >= sdk::RPSUI_MAX_PANELS) break;
+                if (out.panelCount >= api::cooperation::kSnapshotPanels) break;
                 auto& entry = out.panels[out.panelCount++];
                 entry.ownerToken = panel.ownerToken;
                 entry.panelHandle = panel.panelHandle;
@@ -610,18 +591,18 @@ namespace rpsui
             std::sort(out.panels, out.panels + out.panelCount, [](const auto& left, const auto& right) {
                 return left.sortOrder != right.sortOrder ? left.sortOrder < right.sortOrder : left.panelHandle < right.panelHandle;
             });
-            return sdk::ResultV1::Ok;
+            return api::Result::Ok;
         } catch (...) {
             out = {};
-            return sdk::ResultV1::InternalError;
+            return api::Result::InternalError;
         }
     }
 
-    sdk::ResultV1 FrameworkRuntime::getRegistryPage(const sdk::RegistryQueryV1& query, sdk::RegistryPageV1& out) const noexcept
+    api::Result FrameworkRuntime::getRegistryPage(const api::registry::Query& query, api::registry::Page& out) const noexcept
     {
-        if (query.structSize < sizeof(query) || out.structSize < sizeof(out)) return sdk::ResultV1::InvalidArgument;
-        if (query.apiVersion != sdk::RPSUI_REGISTRY_VERSION || out.apiVersion != sdk::RPSUI_REGISTRY_VERSION)
-            return sdk::ResultV1::VersionMismatch;
+        if (query.size < sizeof(query) || out.size < sizeof(out)) return api::Result::InvalidArgument;
+        if (query.version != api::kRecordVersion || out.version != api::kRecordVersion)
+            return api::Result::VersionMismatch;
         try {
             out = {};
             std::scoped_lock lock(mutex_);
@@ -635,10 +616,9 @@ namespace rpsui
             out.nextPanelHandle = query.afterPanelHandle;
             auto consumer = std::upper_bound(consumers_.begin(), consumers_.end(), query.afterOwnerToken,
                 [](std::uint64_t token, const ConsumerRecord& record) { return token < record.ownerToken; });
-            for (; consumer != consumers_.end() && out.consumerCount < sdk::RPSUI_REGISTRY_PAGE_CONSUMERS; ++consumer) {
+            for (; consumer != consumers_.end() && out.consumerCount < api::registry::kPageConsumers; ++consumer) {
                 auto& entry = out.consumers[out.consumerCount++];
                 entry.ownerToken = consumer->ownerToken;
-                entry.grantedFeatures = consumer->grantedFeatures;
                 std::memcpy(entry.consumerId, consumer->consumerId.c_str(), consumer->consumerId.size() + 1);
                 std::memcpy(entry.displayName, consumer->displayName.c_str(), consumer->displayName.size() + 1);
                 out.nextOwnerToken = consumer->ownerToken;
@@ -646,7 +626,7 @@ namespace rpsui
             out.moreConsumers = consumer != consumers_.end();
             auto panel = std::upper_bound(panels_.begin(), panels_.end(), query.afterPanelHandle,
                 [](std::uint64_t handle, const PanelRecord& record) { return handle < record.panelHandle; });
-            for (; panel != panels_.end() && out.panelCount < sdk::RPSUI_REGISTRY_PAGE_PANELS; ++panel) {
+            for (; panel != panels_.end() && out.panelCount < api::registry::kPagePanels; ++panel) {
                 auto& entry = out.panels[out.panelCount++];
                 entry.ownerToken = panel->ownerToken;
                 entry.panelHandle = panel->panelHandle;
@@ -662,22 +642,22 @@ namespace rpsui
                 out.nextPanelHandle = panel->panelHandle;
             }
             out.morePanels = panel != panels_.end();
-            return sdk::ResultV1::Ok;
+            return api::Result::Ok;
         } catch (...) {
             out = {};
-            return sdk::ResultV1::InternalError;
+            return api::Result::InternalError;
         }
     }
 
-    rpsui::sdk::ResultV1 FrameworkRuntime::unregisterPanel(
+    rpsui::api::Result FrameworkRuntime::unregisterPanel(
         std::uint64_t ownerToken,
         std::uint64_t panelHandle) noexcept
     { return unregisterPanelImpl(ownerToken, panelHandle, false); }
 
-    sdk::ResultV1 FrameworkRuntime::unregisterPanelSafely(std::uint64_t ownerToken, std::uint64_t panelHandle) noexcept
+    api::Result FrameworkRuntime::unregisterPanelSafely(std::uint64_t ownerToken, std::uint64_t panelHandle) noexcept
     { return unregisterPanelImpl(ownerToken, panelHandle, true); }
 
-    sdk::ResultV1 FrameworkRuntime::unregisterPanelImpl(std::uint64_t ownerToken, std::uint64_t panelHandle, bool drain) noexcept
+    api::Result FrameworkRuntime::unregisterPanelImpl(std::uint64_t ownerToken, std::uint64_t panelHandle, bool drain) noexcept
     {
         try {
             std::scoped_lock lock(mutex_);
@@ -688,10 +668,10 @@ namespace rpsui
                     return entry.panelHandle == panelHandle;
                 });
             if (panel == panels_.end()) {
-                return rpsui::sdk::ResultV1::PanelNotRegistered;
+                return rpsui::api::Result::PanelNotRegistered;
             }
             if (panel->ownerToken != ownerToken) {
-                return rpsui::sdk::ResultV1::OwnershipMismatch;
+                return rpsui::api::Result::OwnershipMismatch;
             }
             const bool ownedInteraction =
                 pointerPanelHandle_ == panelHandle ||
@@ -706,18 +686,18 @@ namespace rpsui
                 clearPointerStateLocked();
             }
             updateDepthRequestLocked();
-            if (drain && !drained) return sdk::ResultV1::CallbackBusy;
+            if (drain && !drained) return api::Result::CallbackBusy;
             panels_.erase(panel);
             rebuildOpenPanelsLocked();
             ++registryRevision_;
-            return rpsui::sdk::ResultV1::Ok;
+            return rpsui::api::Result::Ok;
         } catch (...) {
-            return rpsui::sdk::ResultV1::InternalError;
+            return rpsui::api::Result::InternalError;
         }
     }
 
     bool FrameworkRuntime::validatePose(
-        const rpsui::sdk::PanelPoseV1& pose,
+        const rpsui::api::framework::PanelPose& pose,
         const PanelRecord& panel) const noexcept
     {
         const auto finite3 = [](const float* value) {
@@ -814,32 +794,32 @@ namespace rpsui
             if (panels_[index].open) openPanels_.push_back(index);
     }
 
-    rpsui::sdk::ResultV1 FrameworkRuntime::submitPanelPresentation(
+    rpsui::api::Result FrameworkRuntime::submitPanelPresentation(
         std::uint64_t ownerToken,
         std::uint64_t panelHandle,
-        const rpsui::sdk::PanelPresentationV1& presentation) noexcept
+        const rpsui::api::framework::PanelPresentation& presentation) noexcept
     {
         try {
-            if (presentation.structSize < sizeof(presentation) ||
-                presentation.apiVersion != rpsui::sdk::RPSUI_API_VERSION) {
-                return rpsui::sdk::ResultV1::InvalidArgument;
+            if (presentation.size < sizeof(presentation) ||
+                presentation.version != rpsui::api::kRecordVersion) {
+                return rpsui::api::Result::InvalidArgument;
             }
             std::scoped_lock lock(mutex_);
             auto* panel = findPanelLocked(panelHandle);
             if (!panel) {
-                return rpsui::sdk::ResultV1::PanelNotRegistered;
+                return rpsui::api::Result::PanelNotRegistered;
             }
             if (panel->ownerToken != ownerToken) {
-                return rpsui::sdk::ResultV1::OwnershipMismatch;
+                return rpsui::api::Result::OwnershipMismatch;
             }
             if (presentation.sequence != 0 &&
                 presentation.sequence <= panel->submittedSequence) {
-                return rpsui::sdk::ResultV1::InvalidArgument;
+                return rpsui::api::Result::InvalidArgument;
             }
-            if (panel->closing) return sdk::ResultV1::PanelClosing;
+            if (panel->closing) return api::Result::PanelClosing;
             if (presentation.open != 0 &&
                 !validatePose(presentation.pose, *panel)) {
-                return rpsui::sdk::ResultV1::InvalidPose;
+                return rpsui::api::Result::InvalidPose;
             }
 
             setPanelOpenLocked(*panel, presentation.open != 0);
@@ -862,13 +842,13 @@ namespace rpsui
                 panel->submittedSequence + 1;
             ++panel->stateSequence;
             updateDepthRequestLocked();
-            return rpsui::sdk::ResultV1::Ok;
+            return rpsui::api::Result::Ok;
         } catch (...) {
-            return rpsui::sdk::ResultV1::InternalError;
+            return rpsui::api::Result::InternalError;
         }
     }
 
-    rpsui::sdk::ResultV1 FrameworkRuntime::resetPanelSize(
+    rpsui::api::Result FrameworkRuntime::resetPanelSize(
         std::uint64_t ownerToken,
         std::uint64_t panelHandle) noexcept
     {
@@ -876,12 +856,12 @@ namespace rpsui
             std::scoped_lock lock(mutex_);
             auto* panel = findPanelLocked(panelHandle);
             if (!panel) {
-                return rpsui::sdk::ResultV1::PanelNotRegistered;
+                return rpsui::api::Result::PanelNotRegistered;
             }
             if (panel->ownerToken != ownerToken) {
-                return rpsui::sdk::ResultV1::OwnershipMismatch;
+                return rpsui::api::Result::OwnershipMismatch;
             }
-            if (panel->closing) return sdk::ResultV1::PanelClosing;
+            if (panel->closing) return api::Result::PanelClosing;
             const float aspect =
                 static_cast<float>(panel->pixelWidth) /
                 static_cast<float>(panel->pixelHeight);
@@ -889,26 +869,26 @@ namespace rpsui
             panel->pose.physicalHeight =
                 panel->defaultPhysicalWidth / aspect;
             ++panel->stateSequence;
-            return rpsui::sdk::ResultV1::Ok;
+            return rpsui::api::Result::Ok;
         } catch (...) {
-            return rpsui::sdk::ResultV1::InternalError;
+            return rpsui::api::Result::InternalError;
         }
     }
 
-    rpsui::sdk::ResultV1 FrameworkRuntime::getPanelState(
+    rpsui::api::Result FrameworkRuntime::getPanelState(
         std::uint64_t ownerToken,
         std::uint64_t panelHandle,
-        rpsui::sdk::PanelStateV1& outState) const noexcept
+        rpsui::api::framework::PanelState& outState) const noexcept
     {
         try {
             outState = {};
             std::scoped_lock lock(mutex_);
             const auto* panel = findPanelLocked(panelHandle);
             if (!panel) {
-                return rpsui::sdk::ResultV1::PanelNotRegistered;
+                return rpsui::api::Result::PanelNotRegistered;
             }
             if (panel->ownerToken != ownerToken) {
-                return rpsui::sdk::ResultV1::OwnershipMismatch;
+                return rpsui::api::Result::OwnershipMismatch;
             }
             outState.sequence = panel->stateSequence;
             outState.pose = panel->pose;
@@ -918,18 +898,18 @@ namespace rpsui
             outState.open = panel->open ? 1 : 0;
             outState.pointerValid = panel->input.valid ? 1 : 0;
             outState.primaryDown = panel->input.primaryDown ? 1 : 0;
-            return rpsui::sdk::ResultV1::Ok;
+            return rpsui::api::Result::Ok;
         } catch (...) {
-            return rpsui::sdk::ResultV1::InternalError;
+            return rpsui::api::Result::InternalError;
         }
     }
 
     bool FrameworkRuntime::requestInputSuppressionLocked(
-        const sdk::InputFrameV1& snapshot, pointer_hand_selection::Hand hand) noexcept
+        const api::input::Frame& snapshot, pointer_hand_selection::Hand hand) noexcept
     {
         bool config = false;
         for (const auto index : openPanels_)
-            config |= sdk::hasPanelFlag(panels_[index].flags, sdk::PanelFlagV1::ConfigNavigation);
+            config |= api::framework::hasPanelFlag(panels_[index].flags, api::framework::PanelFlag::ConfigNavigation);
         const bool accepted=input::captureHost(static_cast<unsigned>(handIndex(hand)), snapshot.ready, config);
         if (accepted) suppressedHands_ |= suppressionBit(hand);
         return accepted && snapshot.ready;
@@ -969,7 +949,7 @@ namespace rpsui
     }
 
     void FrameworkRuntime::updatePointerLocked(
-        const sdk::InputFrameV1& snapshot) noexcept
+        const api::input::Frame& snapshot) noexcept
     {
         for (const auto index : openPanels_) {
             panels_[index].input = {};
@@ -1012,7 +992,7 @@ namespace rpsui
                             sample.ray,
                             intersectionPanel(panel.pose),
                             hit) &&
-                        hit.inside && sdk::panelContains(panel.flags, hit.u, hit.v) &&
+                        hit.inside && api::framework::panelContains(panel.flags, hit.u, hit.v) &&
                         hit.distance < nearest) {
                         nearest = hit.distance;
                         sample.hit = hit;
@@ -1023,7 +1003,7 @@ namespace rpsui
             }
 
             const auto* hitPanel = findPanelLocked(sample.hitPanel);
-            sample.configNavigation = hitPanel && sdk::hasPanelFlag(hitPanel->flags, sdk::PanelFlagV1::ConfigNavigation);
+            sample.configNavigation = hitPanel && api::framework::hasPanelFlag(hitPanel->flags, api::framework::PanelFlag::ConfigNavigation);
             sample.stick = {transform.stick[0], transform.stick[1]};
             sample.rawBackAvailable = sample.configNavigation && transform.valid;
             sample.rawBackDown = sample.rawBackAvailable && input::rawButton(static_cast<unsigned>(index), 2);
@@ -1295,10 +1275,10 @@ namespace rpsui
             return;
         }
         const bool controlsPanel =
-            sdk::panelContains(panel->flags, hit.u, hit.v) ||
+            api::framework::panelContains(panel->flags, hit.u, hit.v) ||
             (!panel->focusedInput && decision.previousPrimaryDown && decision.pressBeganOnPanel);
         const auto resizeHandle =
-            hit.inside && !sdk::hasPanelFlag(panel->flags, sdk::PanelFlagV1::FixedSize) ?
+            hit.inside && !api::framework::hasPanelFlag(panel->flags, api::framework::PanelFlag::FixedSize) ?
             panel_resize::hitTest(
                 hit.u,
                 hit.v,
@@ -1383,7 +1363,7 @@ namespace rpsui
     }
 
     void FrameworkRuntime::handleInputFrame(
-        const sdk::InputFrameV1& snapshot) noexcept
+        const api::input::Frame& snapshot) noexcept
     {
         try {
             std::scoped_lock lock(mutex_);

@@ -1,15 +1,8 @@
 #include "PanelCooperation.h"
-#include "RPSUIPassivePanelApi.h"
 #include <iostream>
 #include <latch>
 #include <stdexcept>
 #include <thread>
-
-static_assert(sizeof(rpsui::sdk::ApiV1) == 152);
-static_assert(offsetof(rpsui::sdk::ApiV1, isFrameworkReady) == 24);
-static_assert(offsetof(rpsui::sdk::ApiV1, reserved) == 88);
-static_assert(sizeof(rpsui::sdk::PanelRegistrationV1) == 248);
-static_assert(sizeof(rpsui::sdk::PassivePanelApiV1) == 24);
 
 namespace
 {
@@ -19,40 +12,40 @@ namespace
 int main()
 {
     try {
-        using namespace rpsui::sdk;
-        CooperativePanelRegistrationV1 registration;
-        PanelAgreementV1 agreement;
-        require(rpsui::validatePanelContract(registration, agreement) == ResultV1::Ok, "private panel contract rejected");
-        for (const auto access : {RenderAccessV1::SceneColorWrite, RenderAccessV1::SceneDepthWrite, RenderAccessV1::StereoSubmissionHook}) {
-            registration.requestedAccess = RPSUI_PANEL_ACCESS | accessMask(access);
-            require(rpsui::validatePanelContract(registration, agreement) == ResultV1::ResourceConflict,
+        using namespace rpsui::api;
+        cooperation::PanelRegistration registration;
+        cooperation::PanelAgreement agreement;
+        require(rpsui::validatePanelContract(registration, agreement) == Result::Ok, "private panel contract rejected");
+        for (const auto access : {cooperation::RenderAccess::SceneColorWrite, cooperation::RenderAccess::SceneDepthWrite, cooperation::RenderAccess::StereoSubmissionHook}) {
+            registration.requestedAccess = cooperation::kPanelAccess | cooperation::accessMask(access);
+            require(rpsui::validatePanelContract(registration, agreement) == Result::ResourceConflict,
                 "host-owned resource must conflict");
             require(agreement.panelHandle == 0 && agreement.grantedAccess == 0 &&
-                agreement.conflictingAccess == accessMask(access) && std::strcmp(agreement.conflictOwnerId, "rps.ui.framework") == 0,
+                agreement.conflictingAccess == cooperation::accessMask(access) && std::strcmp(agreement.conflictOwnerId, "rps.ui.framework") == 0,
                 "conflict must identify host and refuse grants");
         }
-        registration.requestedAccess = RPSUI_PANEL_ACCESS;
-        registration.stage = RenderStageV1::StereoOutput;
-        require(rpsui::validatePanelContract(registration, agreement) == ResultV1::ResourceConflict, "stereo stage must conflict");
-        registration.stage = RenderStageV1::PanelTexture;
-        registration.requestedAccess |= accessMask(RenderAccessV1::SceneDepthRead);
-        require(rpsui::validatePanelContract(registration, agreement) == ResultV1::UnsupportedStage, "private panel cannot borrow scene depth");
+        registration.requestedAccess = cooperation::kPanelAccess;
+        registration.stage = cooperation::RenderStage::StereoOutput;
+        require(rpsui::validatePanelContract(registration, agreement) == Result::ResourceConflict, "stereo stage must conflict");
+        registration.stage = cooperation::RenderStage::PanelTexture;
+        registration.requestedAccess |= cooperation::accessMask(cooperation::RenderAccess::SceneDepthRead);
+        require(rpsui::validatePanelContract(registration, agreement) == Result::UnsupportedStage, "private panel cannot borrow scene depth");
         registration.requestedAccess = 1ull << 63;
-        require(rpsui::validatePanelContract(registration, agreement) == ResultV1::InvalidArgument, "unknown access must fail closed");
+        require(rpsui::validatePanelContract(registration, agreement) == Result::InvalidArgument, "unknown access must fail closed");
         registration.requestedAccess = 0;
-        require(rpsui::validatePanelContract(registration, agreement) == ResultV1::InvalidArgument, "empty access must fail closed");
-        registration.requestedAccess = RPSUI_PANEL_ACCESS;
-        registration.apiVersion = 99;
-        require(rpsui::validatePanelContract(registration, agreement) == ResultV1::VersionMismatch, "wrong version accepted");
-        registration.apiVersion = RPSUI_COOPERATION_VERSION;
-        registration.structSize = 0;
-        require(rpsui::validatePanelContract(registration, agreement) == ResultV1::InvalidArgument, "undersized registration accepted");
-        registration.structSize = sizeof(registration);
-        registration.reserved32 = 1;
-        require(rpsui::validatePanelContract(registration, agreement) == ResultV1::InvalidArgument, "reserved field accepted");
-        registration.reserved32 = 0;
-        registration.stage = static_cast<RenderStageV1>(99);
-        require(rpsui::validatePanelContract(registration, agreement) == ResultV1::UnsupportedStage, "unknown stage accepted");
+        require(rpsui::validatePanelContract(registration, agreement) == Result::InvalidArgument, "empty access must fail closed");
+        registration.requestedAccess = cooperation::kPanelAccess;
+        registration.version = 99;
+        require(rpsui::validatePanelContract(registration, agreement) == Result::VersionMismatch, "wrong version accepted");
+        registration.version = kRecordVersion;
+        registration.size = 0;
+        require(rpsui::validatePanelContract(registration, agreement) == Result::InvalidArgument, "undersized registration accepted");
+        registration.size = sizeof(registration);
+        registration.reserved = 1;
+        require(rpsui::validatePanelContract(registration, agreement) == Result::InvalidArgument, "reserved field accepted");
+        registration.reserved = 0;
+        registration.stage = static_cast<cooperation::RenderStage>(99);
+        require(rpsui::validatePanelContract(registration, agreement) == Result::UnsupportedStage, "unknown stage accepted");
 
         auto first = std::make_shared<rpsui::PanelCallbackGate>();
         auto second = std::make_shared<rpsui::PanelCallbackGate>();
@@ -84,7 +77,7 @@ int main()
             require(static_cast<bool>(callback) && !reentrant->close(), "closing inside a callback must report busy, not deadlock");
         }
         require(reentrant->close(), "self-closing callback failed to drain");
-        std::cout << "Cooperation resource contracts, V1 ABI and callback lifetime passed.\n";
+        std::cout << "Cooperation resource contracts and callback lifetime passed.\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

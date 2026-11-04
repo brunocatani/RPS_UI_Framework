@@ -1,50 +1,56 @@
 #include "PCH.h"
 
 #include "FrameworkRuntime.h"
+#include "InputService.h"
+#include "InterfaceNegotiation.h"
 #include "Logger.h"
-#include "RPSUIFrameworkApi.h"
-#include "RPSUICooperationApi.h"
-#include "RPSUINumberOverlayApi.h"
-#include "RPSUIPassivePanelApi.h"
-#include "RPSUIRegistryApi.h"
-#include "RPSUIFocusedPanelApi.h"
-#include "RPSUIWorldDrawApi.h"
+#include "RequiredUpdates.h"
 #include "WorldDrawStore.h"
+#include <RPS_UI_Framework/Cooperation.h>
+#include <RPS_UI_Framework/FocusedPanel.h>
+#include <RPS_UI_Framework/Framework.h>
+#include <RPS_UI_Framework/NumberOverlay.h>
+#include <RPS_UI_Framework/PassivePanel.h>
+#include <RPS_UI_Framework/Registry.h>
+#include <RPS_UI_Framework/WorldDraw.h>
+
+#include <array>
+#include <intrin.h>
 
 namespace
 {
-    using namespace rpsui::sdk;
+    using namespace rpsui::api;
 
     bool RPSUI_CALL isFrameworkReady() noexcept
     {
         return rpsui::FrameworkRuntime::get().isReady();
     }
 
-    ResultV1 RPSUI_CALL registerConsumer(
-        const ConsumerRegistrationV1* registration,
-        ConsumerHandleV1* outHandle) noexcept
+    Result RPSUI_CALL registerConsumer(
+        const framework::ConsumerRegistration* registration,
+        framework::ConsumerHandle* outHandle) noexcept
     {
         if (!registration || !outHandle) {
-            return ResultV1::InvalidArgument;
+            return Result::InvalidArgument;
         }
         return rpsui::FrameworkRuntime::get().registerConsumer(
             *registration,
             *outHandle);
     }
 
-    ResultV1 RPSUI_CALL unregisterConsumer(
+    Result RPSUI_CALL unregisterConsumer(
         std::uint64_t ownerToken) noexcept
     {
         return rpsui::FrameworkRuntime::get().unregisterConsumer(ownerToken);
     }
 
-    ResultV1 RPSUI_CALL registerPanel(
+    Result RPSUI_CALL registerPanel(
         std::uint64_t ownerToken,
-        const PanelRegistrationV1* registration,
+        const framework::PanelRegistration* registration,
         std::uint64_t* outPanelHandle) noexcept
     {
         if (!registration || !outPanelHandle) {
-            return ResultV1::InvalidArgument;
+            return Result::InvalidArgument;
         }
         return rpsui::FrameworkRuntime::get().registerPanel(
             ownerToken,
@@ -52,7 +58,7 @@ namespace
             *outPanelHandle);
     }
 
-    ResultV1 RPSUI_CALL unregisterPanel(
+    Result RPSUI_CALL unregisterPanel(
         std::uint64_t ownerToken,
         std::uint64_t panelHandle) noexcept
     {
@@ -61,13 +67,13 @@ namespace
             panelHandle);
     }
 
-    ResultV1 RPSUI_CALL submitPanelPresentation(
+    Result RPSUI_CALL submitPanelPresentation(
         std::uint64_t ownerToken,
         std::uint64_t panelHandle,
-        const PanelPresentationV1* presentation) noexcept
+        const framework::PanelPresentation* presentation) noexcept
     {
         if (!presentation) {
-            return ResultV1::InvalidArgument;
+            return Result::InvalidArgument;
         }
         return rpsui::FrameworkRuntime::get().submitPanelPresentation(
             ownerToken,
@@ -75,7 +81,7 @@ namespace
             *presentation);
     }
 
-    ResultV1 RPSUI_CALL resetPanelSize(
+    Result RPSUI_CALL resetPanelSize(
         std::uint64_t ownerToken,
         std::uint64_t panelHandle) noexcept
     {
@@ -84,13 +90,13 @@ namespace
             panelHandle);
     }
 
-    ResultV1 RPSUI_CALL getPanelState(
+    Result RPSUI_CALL getPanelState(
         std::uint64_t ownerToken,
         std::uint64_t panelHandle,
-        PanelStateV1* outState) noexcept
+        framework::PanelState* outState) noexcept
     {
         if (!outState) {
-            return ResultV1::InvalidArgument;
+            return Result::InvalidArgument;
         }
         return rpsui::FrameworkRuntime::get().getPanelState(
             ownerToken,
@@ -98,16 +104,7 @@ namespace
             *outState);
     }
 
-    const ApiV1 g_api{
-        .featureBits =
-            featureMask(FeatureV1::MultipleWorldPanels) |
-            featureMask(FeatureV1::SceneDepthOcclusion) |
-            featureMask(FeatureV1::CentralPointerRouting) |
-            featureMask(FeatureV1::ContextualTwoAxisScroll) |
-            featureMask(FeatureV1::PhysicalPanelResize) |
-            featureMask(FeatureV1::ConsumerRenderCallbacks) |
-            featureMask(FeatureV1::SharedStereoComposition) |
-            featureMask(FeatureV1::ShapedPanels),
+    const framework::Api g_api{
         .isFrameworkReady = &isFrameworkReady,
         .registerConsumer = &registerConsumer,
         .unregisterConsumer = &unregisterConsumer,
@@ -118,83 +115,83 @@ namespace
         .getPanelState = &getPanelState,
     };
 
-    ResultV1 RPSUI_CALL registerCooperativePanel(std::uint64_t owner,
-        const CooperativePanelRegistrationV1* registration, PanelAgreementV1* agreement) noexcept
+    Result RPSUI_CALL registerCooperativePanel(std::uint64_t owner,
+        const cooperation::PanelRegistration* registration, cooperation::PanelAgreement* agreement) noexcept
     {
-        if (!agreement || agreement->structSize < sizeof(PanelAgreementV1)) return ResultV1::InvalidArgument;
-        if (agreement->apiVersion != RPSUI_COOPERATION_VERSION) return ResultV1::VersionMismatch;
-        if (!registration) { *agreement = {}; return ResultV1::InvalidArgument; }
+        if (!agreement || agreement->size < sizeof(cooperation::PanelAgreement)) return Result::InvalidArgument;
+        if (agreement->version != kRecordVersion) return Result::VersionMismatch;
+        if (!registration) { *agreement = {}; return Result::InvalidArgument; }
         return rpsui::FrameworkRuntime::get().registerCooperativePanel(owner, *registration, *agreement);
     }
-    ResultV1 RPSUI_CALL getCooperationSnapshot(CooperationSnapshotV1* snapshot) noexcept
+    Result RPSUI_CALL getCooperationSnapshot(cooperation::Snapshot* snapshot) noexcept
     {
-        if (!snapshot || snapshot->structSize < sizeof(CooperationSnapshotV1)) return ResultV1::InvalidArgument;
-        if (snapshot->apiVersion != RPSUI_COOPERATION_VERSION) return ResultV1::VersionMismatch;
+        if (!snapshot || snapshot->size < sizeof(cooperation::Snapshot)) return Result::InvalidArgument;
+        if (snapshot->version != kRecordVersion) return Result::VersionMismatch;
         return rpsui::FrameworkRuntime::get().getCooperationSnapshot(*snapshot);
     }
-    ResultV1 RPSUI_CALL unregisterPanelSafely(std::uint64_t owner, std::uint64_t panel) noexcept
+    Result RPSUI_CALL unregisterPanelSafely(std::uint64_t owner, std::uint64_t panel) noexcept
     { return rpsui::FrameworkRuntime::get().unregisterPanelSafely(owner, panel); }
-    ResultV1 RPSUI_CALL unregisterConsumerSafely(std::uint64_t owner) noexcept
+    Result RPSUI_CALL unregisterConsumerSafely(std::uint64_t owner) noexcept
     { return rpsui::FrameworkRuntime::get().unregisterConsumerSafely(owner); }
 
-    const CooperationApiV1 g_cooperation{
+    const cooperation::Api g_cooperation{
         .registerPanel = &registerCooperativePanel,
         .getSnapshot = &getCooperationSnapshot,
         .unregisterPanelSafely = &unregisterPanelSafely,
         .unregisterConsumerSafely = &unregisterConsumerSafely,
     };
 
-    ResultV1 RPSUI_CALL getRegistryPage(const RegistryQueryV1* query, RegistryPageV1* page) noexcept
+    Result RPSUI_CALL getRegistryPage(const registry::Query* query, registry::Page* page) noexcept
     {
-        if (!query || !page) return ResultV1::InvalidArgument;
+        if (!query || !page) return Result::InvalidArgument;
         return rpsui::FrameworkRuntime::get().getRegistryPage(*query, *page);
     }
-    const RegistryApiV1 g_registry{ .getPage = &getRegistryPage };
+    const registry::Api g_registry{ .getPage = &getRegistryPage };
 
-    ResultV1 RPSUI_CALL registerNumberOverlay(std::uint64_t owner,
-        const NumberOverlayRegistrationV1* registration,std::uint64_t* handle) noexcept
+    Result RPSUI_CALL registerNumberOverlay(std::uint64_t owner,
+        const number_overlay::Registration* registration,std::uint64_t* handle) noexcept
     {
-        if (!registration || !handle) return ResultV1::InvalidArgument;
+        if (!registration || !handle) return Result::InvalidArgument;
         return rpsui::FrameworkRuntime::get().registerNumberOverlay(owner,*registration,*handle);
     }
-    ResultV1 RPSUI_CALL submitNumberOverlay(std::uint64_t owner,std::uint64_t handle,
-        const NumberOverlayPresentationV1* presentation) noexcept
+    Result RPSUI_CALL submitNumberOverlay(std::uint64_t owner,std::uint64_t handle,
+        const number_overlay::Presentation* presentation) noexcept
     {
-        if (!presentation) return ResultV1::InvalidArgument;
+        if (!presentation) return Result::InvalidArgument;
         return rpsui::FrameworkRuntime::get().submitNumberOverlay(owner,handle,*presentation);
     }
-    ResultV1 RPSUI_CALL registerPassivePanel(std::uint64_t owner,
-        const PanelRegistrationV1* registration, std::uint64_t* handle) noexcept
+    Result RPSUI_CALL registerPassivePanel(std::uint64_t owner,
+        const framework::PanelRegistration* registration, std::uint64_t* handle) noexcept
     {
-        if (!registration || !handle) return ResultV1::InvalidArgument;
+        if (!registration || !handle) return Result::InvalidArgument;
         return rpsui::FrameworkRuntime::get().registerPassivePanel(owner, *registration, *handle);
     }
-    const PassivePanelApiV1 g_passive{.registerPanel = &registerPassivePanel};
-    ResultV1 RPSUI_CALL registerFocusedPanel(std::uint64_t owner,
-        const PanelRegistrationV1* registration, std::uint64_t* handle) noexcept
+    const passive_panel::Api g_passive{.registerPanel = &registerPassivePanel};
+    Result RPSUI_CALL registerFocusedPanel(std::uint64_t owner,
+        const framework::PanelRegistration* registration, std::uint64_t* handle) noexcept
     {
-        if (!registration || !handle) return ResultV1::InvalidArgument;
+        if (!registration || !handle) return Result::InvalidArgument;
         return rpsui::FrameworkRuntime::get().registerFocusedPanel(owner, *registration, *handle);
     }
-    const FocusedPanelApiV1 g_focused{.registerPanel = &registerFocusedPanel};
-    ResultV1 RPSUI_CALL submitWorldDraw(std::uint64_t owner, const WorldDrawPublicationV1* publication) noexcept
+    const focused_panel::Api g_focused{.registerPanel = &registerFocusedPanel};
+    Result RPSUI_CALL submitWorldDraw(std::uint64_t owner, const world_draw::Publication* publication) noexcept
     {
-        if (!publication) return ResultV1::InvalidArgument;
+        if (!publication) return Result::InvalidArgument;
         return rpsui::world_draw::store().submit(owner, *publication, rpsui::world_draw::currentFrame());
     }
-    ResultV1 RPSUI_CALL clearWorldDraw(std::uint64_t owner) noexcept
+    Result RPSUI_CALL clearWorldDraw(std::uint64_t owner) noexcept
     { return rpsui::world_draw::store().clear(owner); }
-    ResultV1 RPSUI_CALL registerWorldMesh(std::uint64_t owner, std::uint64_t meshId, const WorldMeshV1* mesh) noexcept
+    Result RPSUI_CALL registerWorldMesh(std::uint64_t owner, std::uint64_t meshId, const world_draw::Mesh* mesh) noexcept
     {
-        if (!mesh) return ResultV1::InvalidArgument;
+        if (!mesh) return Result::InvalidArgument;
         return rpsui::world_draw::store().registerMesh(owner, meshId, *mesh);
     }
-    ResultV1 RPSUI_CALL releaseWorldMesh(std::uint64_t owner, std::uint64_t meshId) noexcept
+    Result RPSUI_CALL releaseWorldMesh(std::uint64_t owner, std::uint64_t meshId) noexcept
     { return rpsui::world_draw::store().releaseMesh(owner, meshId); }
-    ResultV1 RPSUI_CALL setWorldDrawFrameCallback(std::uint64_t owner, WorldDrawFrameCallbackV1 callback,
+    Result RPSUI_CALL setWorldDrawFrameCallback(std::uint64_t owner, world_draw::FrameCallback callback,
         void* context) noexcept
     { return rpsui::world_draw::store().setFrameCallback(owner, callback, context); }
-    const WorldDrawApiV1 g_worldDraw{
+    const world_draw::Api g_worldDraw{
         .submit = &submitWorldDraw,
         .clear = &clearWorldDraw,
         .registerMesh = &registerWorldMesh,
@@ -202,50 +199,87 @@ namespace
         .setFrameCallback = &setWorldDrawFrameCallback,
     };
 
-    const NumberOverlayApiV1 g_numbers{
+    const number_overlay::Api g_numbers{
         .registerOverlay=&registerNumberOverlay,
         .submit=&submitNumberOverlay,
         .unregisterOverlay=&unregisterPanel,
     };
+
+    // Any thread; built on first use because the input table lives with the
+    // input service.
+    std::span<const InterfaceDescriptorV1> interfaces() noexcept
+    {
+        static const std::array entries{
+            rpsui::discovery::describe(g_api),
+            rpsui::discovery::describe(g_cooperation),
+            rpsui::discovery::describe(g_focused),
+            rpsui::discovery::describe(rpsui::input::table()),
+            rpsui::discovery::describe(g_numbers),
+            rpsui::discovery::describe(g_passive),
+            rpsui::discovery::describe(g_registry),
+            rpsui::discovery::describe(g_worldDraw),
+        };
+        return entries;
+    }
 }
 
-extern "C" DLLEXPORT const rpsui::sdk::ApiV1* RPSUI_CALL
-RPSUI_RequestApi(std::uint32_t requestedVersion) noexcept
+extern "C" DLLEXPORT rpsui::api::Result RPSUI_CALL RPSUI_QueryInterfaceV1(const rpsui::api::InterfaceId id,
+    const std::uint32_t exactMajor, const std::uint32_t minimumMinor, const std::uint32_t minimumTableBytes,
+    const rpsui::api::InterfaceDescriptorV1** output) noexcept
 {
-    return requestedVersion == rpsui::sdk::RPSUI_API_VERSION ?
-        std::addressof(g_api) :
-        nullptr;
+    const auto result = rpsui::discovery::query(interfaces(), id, exactMajor, minimumMinor, minimumTableBytes, output);
+    if (result != rpsui::api::Result::Ok)
+        rpsui::required_updates::noteDiscoveryRefusal(result, id, exactMajor, _ReturnAddress());
+    return result;
 }
 
-extern "C" DLLEXPORT const rpsui::sdk::CooperationApiV1* RPSUI_CALL
-RPSUI_RequestCooperationApi(std::uint32_t requestedVersion) noexcept
+// Retired pre-2.0 exports. They stay exported so a mod still built against them
+// is named in the required-update stop instead of failing on a missing symbol;
+// each returns no table. Their names are never reused.
+extern "C" DLLEXPORT const void* RPSUI_CALL RPSUI_RequestApi(std::uint32_t) noexcept
 {
-    return requestedVersion == rpsui::sdk::RPSUI_COOPERATION_VERSION ? &g_cooperation : nullptr;
+    rpsui::required_updates::noteRetiredExport("RPSUI_RequestApi", _ReturnAddress());
+    return nullptr;
 }
 
-extern "C" DLLEXPORT const rpsui::sdk::NumberOverlayApiV1* RPSUI_CALL
-RPSUI_RequestNumberOverlayApi(std::uint32_t requestedVersion) noexcept
+extern "C" DLLEXPORT const void* RPSUI_CALL RPSUI_RequestCooperationApi(std::uint32_t) noexcept
 {
-    return requestedVersion==rpsui::sdk::RPSUI_NUMBER_OVERLAY_VERSION ? &g_numbers : nullptr;
-}
-extern "C" DLLEXPORT const rpsui::sdk::WorldDrawApiV1* RPSUI_CALL
-RPSUI_RequestWorldDrawApi(std::uint32_t requestedVersion) noexcept
-{
-    return requestedVersion == rpsui::sdk::RPSUI_WORLD_DRAW_VERSION ? &g_worldDraw : nullptr;
-}
-extern "C" DLLEXPORT const rpsui::sdk::RegistryApiV1* RPSUI_CALL
-RPSUI_RequestRegistryApi(std::uint32_t requestedVersion) noexcept
-{
-    return requestedVersion == rpsui::sdk::RPSUI_REGISTRY_VERSION ? &g_registry : nullptr;
-}
-extern "C" DLLEXPORT const rpsui::sdk::PassivePanelApiV1* RPSUI_CALL
-RPSUI_RequestPassivePanelApi(std::uint32_t requestedVersion) noexcept
-{
-    return requestedVersion == 1 ? &g_passive : nullptr;
+    rpsui::required_updates::noteRetiredExport("RPSUI_RequestCooperationApi", _ReturnAddress());
+    return nullptr;
 }
 
-extern "C" DLLEXPORT const rpsui::sdk::FocusedPanelApiV1* RPSUI_CALL
-RPSUI_RequestFocusedPanelApi(std::uint32_t major, std::uint32_t minimumMinor) noexcept
+extern "C" DLLEXPORT const void* RPSUI_CALL RPSUI_RequestNumberOverlayApi(std::uint32_t) noexcept
 {
-    return major == 1 && minimumMinor <= g_focused.minor ? &g_focused : nullptr;
+    rpsui::required_updates::noteRetiredExport("RPSUI_RequestNumberOverlayApi", _ReturnAddress());
+    return nullptr;
+}
+
+extern "C" DLLEXPORT const void* RPSUI_CALL RPSUI_RequestWorldDrawApi(std::uint32_t) noexcept
+{
+    rpsui::required_updates::noteRetiredExport("RPSUI_RequestWorldDrawApi", _ReturnAddress());
+    return nullptr;
+}
+
+extern "C" DLLEXPORT const void* RPSUI_CALL RPSUI_RequestRegistryApi(std::uint32_t) noexcept
+{
+    rpsui::required_updates::noteRetiredExport("RPSUI_RequestRegistryApi", _ReturnAddress());
+    return nullptr;
+}
+
+extern "C" DLLEXPORT const void* RPSUI_CALL RPSUI_RequestPassivePanelApi(std::uint32_t) noexcept
+{
+    rpsui::required_updates::noteRetiredExport("RPSUI_RequestPassivePanelApi", _ReturnAddress());
+    return nullptr;
+}
+
+extern "C" DLLEXPORT const void* RPSUI_CALL RPSUI_RequestFocusedPanelApi(std::uint32_t, std::uint32_t) noexcept
+{
+    rpsui::required_updates::noteRetiredExport("RPSUI_RequestFocusedPanelApi", _ReturnAddress());
+    return nullptr;
+}
+
+extern "C" DLLEXPORT const void* RPSUI_CALL RPSUI_RequestInputApi() noexcept
+{
+    rpsui::required_updates::noteRetiredExport("RPSUI_RequestInputApi", _ReturnAddress());
+    return nullptr;
 }

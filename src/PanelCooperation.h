@@ -1,30 +1,30 @@
 #pragma once
-#include "RPSUICooperationApi.h"
+#include <RPS_UI_Framework/Cooperation.h>
 #include <cstring>
 #include <memory>
 #include <mutex>
 
 namespace rpsui
 {
-    inline sdk::ResultV1 validatePanelContract(const sdk::CooperativePanelRegistrationV1& registration,
-        sdk::PanelAgreementV1& agreement) noexcept
+    inline api::Result validatePanelContract(const api::cooperation::PanelRegistration& registration,
+        api::cooperation::PanelAgreement& agreement) noexcept
     {
         agreement = {};
-        if (registration.structSize < sizeof(registration)) return sdk::ResultV1::InvalidArgument;
-        if (registration.apiVersion != sdk::RPSUI_COOPERATION_VERSION) return sdk::ResultV1::VersionMismatch;
-        constexpr auto known = sdk::RPSUI_PANEL_ACCESS | sdk::RPSUI_HOST_EXCLUSIVE_ACCESS |
-            sdk::accessMask(sdk::RenderAccessV1::SceneDepthRead);
-        if ((registration.requestedAccess & ~known) || registration.reserved32) return sdk::ResultV1::InvalidArgument;
-        const auto conflict = registration.requestedAccess & sdk::RPSUI_HOST_EXCLUSIVE_ACCESS;
-        if (conflict || registration.stage == sdk::RenderStageV1::StereoOutput) {
-            agreement.conflictingAccess = conflict ? conflict : sdk::accessMask(sdk::RenderAccessV1::SceneColorWrite);
+        if (registration.size < sizeof(registration)) return api::Result::InvalidArgument;
+        if (registration.version != api::kRecordVersion) return api::Result::VersionMismatch;
+        constexpr auto known = api::cooperation::kPanelAccess | api::cooperation::kHostExclusiveAccess |
+            api::cooperation::accessMask(api::cooperation::RenderAccess::SceneDepthRead);
+        if ((registration.requestedAccess & ~known) || registration.reserved) return api::Result::InvalidArgument;
+        const auto conflict = registration.requestedAccess & api::cooperation::kHostExclusiveAccess;
+        if (conflict || registration.stage == api::cooperation::RenderStage::StereoOutput) {
+            agreement.conflictingAccess = conflict ? conflict : api::cooperation::accessMask(api::cooperation::RenderAccess::SceneColorWrite);
             std::memcpy(agreement.conflictOwnerId, "rps.ui.framework", sizeof("rps.ui.framework"));
-            return sdk::ResultV1::ResourceConflict;
+            return api::Result::ResourceConflict;
         }
-        if (registration.stage != sdk::RenderStageV1::PanelTexture ||
-            (registration.requestedAccess & sdk::accessMask(sdk::RenderAccessV1::SceneDepthRead)))
-            return sdk::ResultV1::UnsupportedStage;
-        return registration.requestedAccess == sdk::RPSUI_PANEL_ACCESS ? sdk::ResultV1::Ok : sdk::ResultV1::InvalidArgument;
+        if (registration.stage != api::cooperation::RenderStage::PanelTexture ||
+            (registration.requestedAccess & api::cooperation::accessMask(api::cooperation::RenderAccess::SceneDepthRead)))
+            return api::Result::UnsupportedStage;
+        return registration.requestedAccess == api::cooperation::kPanelAccess ? api::Result::Ok : api::Result::InvalidArgument;
     }
 
     // Registry/control and render threads share this lifetime gate. Its lock is

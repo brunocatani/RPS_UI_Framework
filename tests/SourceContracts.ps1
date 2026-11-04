@@ -3,7 +3,6 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $cmake = Get-Content -Raw (Join-Path $root 'CMakeLists.txt')
 $plugin = Get-Content -Raw (Join-Path $root 'src/Plugin.cpp')
-$api = Get-Content -Raw (Join-Path $root 'SDK/include/RPSUIFrameworkApi.h')
 $runtime = Get-Content -Raw (Join-Path $root 'src/FrameworkRuntime.cpp')
 $runtimeHeader = Get-Content -Raw (Join-Path $root 'src/FrameworkRuntime.h')
 $renderer = Get-Content -Raw (Join-Path $root 'src/render/HostRenderer.cpp')
@@ -27,36 +26,6 @@ if ($plugin -match 'RuntimeVersion\(\)\s*[=!<>]+\s*F4SE::RUNTIME_(LATEST_)?VR') 
 }
 
 foreach ($token in @(
-    'RPSUI_API_VERSION = 1',
-    'RPSUI_API_FLAVOR',
-    'RPSUI_MAX_CONSUMERS',
-    'RPSUI_MAX_PANELS',
-    'PanelRenderCallbackV1',
-    'registerConsumer',
-    'registerPanel',
-    'submitPanelPresentation',
-    'resetPanelSize',
-    'getPanelState',
-    'std::is_standard_layout_v'
-)) {
-    if (-not $api.Contains($token)) {
-        throw "Public SDK ABI token missing: $token"
-    }
-}
-
-foreach ($token in @(
-    'RPSUI_RequestApi',
-    'MultipleWorldPanels',
-    'CentralPointerRouting',
-    'ConsumerRenderCallbacks'
-)) {
-    $all = $api + (Get-Content -Raw (Join-Path $root 'src/Api.cpp'))
-    if (-not $all.Contains($token)) {
-        throw "Provider API contract token missing: $token"
-    }
-}
-
-foreach ($token in @(
     'pointer_hand_selection::choose(',
     'pointer_click_gate::advance(',
     'contextual_scroll::update(',
@@ -70,7 +39,7 @@ foreach ($token in @(
 
 foreach ($token in @(
     'snapshotRenderPanels(',
-    'PanelRenderFrameV1',
+    'PanelRenderFrame',
     'renderConsumerPanel(',
     'drawWorldPanel(',
     'AcquireForSubmittedTarget',

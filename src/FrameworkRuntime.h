@@ -7,11 +7,11 @@
 #include "PointerPanelIntersection.h"
 #include "PanelCooperation.h"
 #include "RegistryCapacity.h"
-#include "RPSUIRegistryApi.h"
+#include <RPS_UI_Framework/Registry.h>
 
-#include "RPSUIFrameworkApi.h"
-#include "RPSUIInputApi.h"
-#include "RPSUINumberOverlayApi.h"
+#include <RPS_UI_Framework/Framework.h>
+#include <RPS_UI_Framework/Input.h>
+#include <RPS_UI_Framework/NumberOverlay.h>
 
 #include <array>
 #include <atomic>
@@ -29,13 +29,13 @@ namespace rpsui
     {
         std::array<float, 3> color{ 1.0f, 1.0f, 1.0f };
         std::uint32_t secondaryValue{ 0 };
-        rpsui::sdk::NumberOverlayStyleV1 style{ rpsui::sdk::NumberOverlayStyleV1::Plain };
+        rpsui::api::number_overlay::Style style{ rpsui::api::number_overlay::Style::Plain };
     };
 
     struct RenderPanelSnapshot
     {
         std::uint64_t panelHandle{ 0 };
-        rpsui::sdk::PanelRenderCallbackV1 renderCallback{ nullptr };
+        rpsui::api::framework::PanelRenderCallback renderCallback{ nullptr };
         void* userData{ nullptr };
         std::shared_ptr<PanelCallbackGate> callbackGate;
         std::uint32_t pixelWidth{ 0 };
@@ -46,15 +46,15 @@ namespace rpsui
         std::uint32_t number{};
         float numberOpacity{0.55f};
         NumberOverlayLook numberLook{};
-        rpsui::sdk::PanelPoseV1 pose{};
-        rpsui::sdk::PhysicalHandV1 pointerHand{
-            rpsui::sdk::PhysicalHandV1::None
+        rpsui::api::framework::PanelPose pose{};
+        rpsui::api::framework::PhysicalHand pointerHand{
+            rpsui::api::framework::PhysicalHand::None
         };
-        rpsui::sdk::ResizeHandleV1 hoveredResizeHandle{
-            rpsui::sdk::ResizeHandleV1::None
+        rpsui::api::framework::ResizeHandle hoveredResizeHandle{
+            rpsui::api::framework::ResizeHandle::None
         };
-        rpsui::sdk::ResizeHandleV1 activeResizeHandle{
-            rpsui::sdk::ResizeHandleV1::None
+        rpsui::api::framework::ResizeHandle activeResizeHandle{
+            rpsui::api::framework::ResizeHandle::None
         };
         float pointerPixelX{ 0.0f };
         float pointerPixelY{ 0.0f };
@@ -100,51 +100,51 @@ namespace rpsui
         static FrameworkRuntime& get() noexcept;
 
         bool start() noexcept;
-        void handleInputFrame(const sdk::InputFrameV1& snapshot) noexcept;
+        void handleInputFrame(const api::input::Frame& snapshot) noexcept;
         void setRendererReady(bool ready) noexcept;
-        void setHookStatus(sdk::HookStatusV1 status) noexcept;
+        void setHookStatus(api::cooperation::HookStatus status) noexcept;
         [[nodiscard]] bool isReady() const noexcept;
         [[nodiscard]] bool hasOpenPanels() const noexcept;
         void snapshotRenderPanels(RenderPanelBatch& out) const noexcept;
 
-        [[nodiscard]] rpsui::sdk::ResultV1 registerConsumer(
-            const rpsui::sdk::ConsumerRegistrationV1& registration,
-            rpsui::sdk::ConsumerHandleV1& outHandle) noexcept;
-        [[nodiscard]] rpsui::sdk::ResultV1 unregisterConsumer(
+        [[nodiscard]] rpsui::api::Result registerConsumer(
+            const rpsui::api::framework::ConsumerRegistration& registration,
+            rpsui::api::framework::ConsumerHandle& outHandle) noexcept;
+        [[nodiscard]] rpsui::api::Result unregisterConsumer(
             std::uint64_t ownerToken) noexcept;
-        [[nodiscard]] rpsui::sdk::ResultV1 registerPanel(
+        [[nodiscard]] rpsui::api::Result registerPanel(
             std::uint64_t ownerToken,
-            const rpsui::sdk::PanelRegistrationV1& registration,
+            const rpsui::api::framework::PanelRegistration& registration,
             std::uint64_t& outPanelHandle) noexcept;
-        [[nodiscard]] rpsui::sdk::ResultV1 unregisterPanel(
+        [[nodiscard]] rpsui::api::Result unregisterPanel(
             std::uint64_t ownerToken,
             std::uint64_t panelHandle) noexcept;
-        [[nodiscard]] rpsui::sdk::ResultV1 submitPanelPresentation(
+        [[nodiscard]] rpsui::api::Result submitPanelPresentation(
             std::uint64_t ownerToken,
             std::uint64_t panelHandle,
-            const rpsui::sdk::PanelPresentationV1& presentation) noexcept;
-        [[nodiscard]] rpsui::sdk::ResultV1 resetPanelSize(
+            const rpsui::api::framework::PanelPresentation& presentation) noexcept;
+        [[nodiscard]] rpsui::api::Result resetPanelSize(
             std::uint64_t ownerToken,
             std::uint64_t panelHandle) noexcept;
-        [[nodiscard]] rpsui::sdk::ResultV1 getPanelState(
+        [[nodiscard]] rpsui::api::Result getPanelState(
             std::uint64_t ownerToken,
             std::uint64_t panelHandle,
-            rpsui::sdk::PanelStateV1& outState) const noexcept;
+            rpsui::api::framework::PanelState& outState) const noexcept;
 
-        sdk::ResultV1 registerCooperativePanel(std::uint64_t ownerToken,
-            const sdk::CooperativePanelRegistrationV1&, sdk::PanelAgreementV1&) noexcept;
-        sdk::ResultV1 getCooperationSnapshot(sdk::CooperationSnapshotV1&) const noexcept;
-        sdk::ResultV1 getRegistryPage(const sdk::RegistryQueryV1&, sdk::RegistryPageV1&) const noexcept;
-        sdk::ResultV1 unregisterPanelSafely(std::uint64_t ownerToken, std::uint64_t panelHandle) noexcept;
-        sdk::ResultV1 unregisterConsumerSafely(std::uint64_t ownerToken) noexcept;
-        sdk::ResultV1 registerNumberOverlay(std::uint64_t ownerToken,
-            const sdk::NumberOverlayRegistrationV1&,std::uint64_t& outHandle) noexcept;
-        sdk::ResultV1 registerPassivePanel(std::uint64_t ownerToken,
-            const sdk::PanelRegistrationV1&, std::uint64_t& outHandle) noexcept;
-        sdk::ResultV1 registerFocusedPanel(std::uint64_t ownerToken,
-            const sdk::PanelRegistrationV1&, std::uint64_t& outHandle) noexcept;
-        sdk::ResultV1 submitNumberOverlay(std::uint64_t ownerToken,std::uint64_t handle,
-            const sdk::NumberOverlayPresentationV1&) noexcept;
+        api::Result registerCooperativePanel(std::uint64_t ownerToken,
+            const api::cooperation::PanelRegistration&, api::cooperation::PanelAgreement&) noexcept;
+        api::Result getCooperationSnapshot(api::cooperation::Snapshot&) const noexcept;
+        api::Result getRegistryPage(const api::registry::Query&, api::registry::Page&) const noexcept;
+        api::Result unregisterPanelSafely(std::uint64_t ownerToken, std::uint64_t panelHandle) noexcept;
+        api::Result unregisterConsumerSafely(std::uint64_t ownerToken) noexcept;
+        api::Result registerNumberOverlay(std::uint64_t ownerToken,
+            const api::number_overlay::Registration&,std::uint64_t& outHandle) noexcept;
+        api::Result registerPassivePanel(std::uint64_t ownerToken,
+            const api::framework::PanelRegistration&, std::uint64_t& outHandle) noexcept;
+        api::Result registerFocusedPanel(std::uint64_t ownerToken,
+            const api::framework::PanelRegistration&, std::uint64_t& outHandle) noexcept;
+        api::Result submitNumberOverlay(std::uint64_t ownerToken,std::uint64_t handle,
+            const api::number_overlay::Presentation&) noexcept;
 
         FrameworkRuntime(const FrameworkRuntime&) = delete;
         FrameworkRuntime& operator=(const FrameworkRuntime&) = delete;
@@ -155,20 +155,19 @@ namespace rpsui
             std::uint64_t ownerToken{ 0 };
             std::string consumerId;
             std::string displayName;
-            std::uint64_t grantedFeatures{ 0 };
             bool closing{ false };
         };
 
         struct PanelInput
         {
-            rpsui::sdk::PhysicalHandV1 hand{
-                rpsui::sdk::PhysicalHandV1::None
+            rpsui::api::framework::PhysicalHand hand{
+                rpsui::api::framework::PhysicalHand::None
             };
-            rpsui::sdk::ResizeHandleV1 hovered{
-                rpsui::sdk::ResizeHandleV1::None
+            rpsui::api::framework::ResizeHandle hovered{
+                rpsui::api::framework::ResizeHandle::None
             };
-            rpsui::sdk::ResizeHandleV1 active{
-                rpsui::sdk::ResizeHandleV1::None
+            rpsui::api::framework::ResizeHandle active{
+                rpsui::api::framework::ResizeHandle::None
             };
             float pixelX{ 0.0f };
             float pixelY{ 0.0f };
@@ -196,10 +195,10 @@ namespace rpsui
             std::uint32_t number{};
             float numberOpacity{0.55f};
             NumberOverlayLook numberLook{};
-            rpsui::sdk::PanelRenderCallbackV1 renderCallback{ nullptr };
+            rpsui::api::framework::PanelRenderCallback renderCallback{ nullptr };
             void* userData{ nullptr };
             std::shared_ptr<PanelCallbackGate> callbackGate;
-            rpsui::sdk::PanelPoseV1 pose{};
+            rpsui::api::framework::PanelPose pose{};
             PanelInput input{};
             std::uint64_t submittedSequence{ 0 };
             std::uint64_t stateSequence{ 1 };
@@ -244,18 +243,18 @@ namespace rpsui
                 pointer_hand_selection::Hand::None
             };
             panel_resize::Drag drag{};
-            rpsui::sdk::PanelPoseV1 initialPose{};
+            rpsui::api::framework::PanelPose initialPose{};
         };
 
         FrameworkRuntime();
         ~FrameworkRuntime() = default;
 
-        sdk::ResultV1 registerPanelImpl(std::uint64_t ownerToken,
-            const sdk::PanelRegistrationV1&, std::uint64_t& outPanelHandle, bool cooperative,
-            sdk::PanelAgreementV1* agreement = nullptr, bool numberOverlay = false, bool passive = false,
+        api::Result registerPanelImpl(std::uint64_t ownerToken,
+            const api::framework::PanelRegistration&, std::uint64_t& outPanelHandle, bool cooperative,
+            api::cooperation::PanelAgreement* agreement = nullptr, bool numberOverlay = false, bool passive = false,
             bool focusedInput = false) noexcept;
-        sdk::ResultV1 unregisterPanelImpl(std::uint64_t ownerToken, std::uint64_t panelHandle, bool drain) noexcept;
-        sdk::ResultV1 unregisterConsumerImpl(std::uint64_t ownerToken, bool drain) noexcept;
+        api::Result unregisterPanelImpl(std::uint64_t ownerToken, std::uint64_t panelHandle, bool drain) noexcept;
+        api::Result unregisterConsumerImpl(std::uint64_t ownerToken, bool drain) noexcept;
 
         [[nodiscard]] PanelRecord* findPanelLocked(
             std::uint64_t panelHandle) noexcept;
@@ -267,16 +266,16 @@ namespace rpsui
             std::uint64_t ownerToken,
             std::uint64_t panelHandle) const noexcept;
         [[nodiscard]] bool validatePose(
-            const rpsui::sdk::PanelPoseV1& pose,
+            const rpsui::api::framework::PanelPose& pose,
             const PanelRecord& panel) const noexcept;
         void separateNewPanelLocked(PanelRecord& panel) noexcept;
         void updateDepthRequestLocked() const noexcept;
         void setPanelOpenLocked(PanelRecord& panel, bool open) noexcept;
         void rebuildOpenPanelsLocked() noexcept;
         void updatePointerLocked(
-            const sdk::InputFrameV1& snapshot) noexcept;
+            const api::input::Frame& snapshot) noexcept;
         [[nodiscard]] bool requestInputSuppressionLocked(
-            const sdk::InputFrameV1& snapshot,
+            const api::input::Frame& snapshot,
             pointer_hand_selection::Hand hand) noexcept;
         void clearInputSuppressionLocked(
             pointer_hand_selection::Hand hand) noexcept;
@@ -294,7 +293,7 @@ namespace rpsui
         std::uint64_t nextPanelHandle_{ 1 };
         std::atomic_bool started_{ false };
         std::atomic_bool rendererReady_{ false };
-        std::atomic<sdk::HookStatusV1> hookStatus_{ sdk::HookStatusV1::NotInstalled };
+        std::atomic<api::cooperation::HookStatus> hookStatus_{ api::cooperation::HookStatus::NotInstalled };
 
         std::array<HandState, 2> handState_{};
         std::array<contextual_scroll::State, 2> scrollState_{};

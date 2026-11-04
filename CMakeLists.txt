@@ -5,8 +5,15 @@ set(FRIENDLY_NAME "RPS UI Framework")
 set(VERSION 1.1.1)
 set(ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(SOURCE_DIR "${ROOT_DIR}/src")
-set(SDK_INCLUDE_DIR "${ROOT_DIR}/SDK/include")
+# RPS UI's own provider API: self-contained headers the DLL compiles against.
+set(PUBLIC_INCLUDE_DIR "${ROOT_DIR}/include")
 get_filename_component(WORKSPACE_ROOT "${ROOT_DIR}/../.." ABSOLUTE)
+# RPS Framework's header-only required-update stop (RPS/Runtime/RequiredUpdate.h).
+set(RPS_FRAMEWORK_INCLUDE_DIR "${WORKSPACE_ROOT}/PROJECT_ROCK_V2/my_frameworks_and_sdks/RPS_Framework/include"
+  CACHE PATH "RPS Framework public include directory")
+if(NOT EXISTS "${RPS_FRAMEWORK_INCLUDE_DIR}/RPS/Runtime/RequiredUpdate.h")
+  message(FATAL_ERROR "RPS Framework headers not found in '${RPS_FRAMEWORK_INCLUDE_DIR}'; set RPS_FRAMEWORK_INCLUDE_DIR.")
+endif()
 
 if(PROJECT_SOURCE_DIR STREQUAL PROJECT_BINARY_DIR)
   message(FATAL_ERROR "In-source builds are not allowed")
@@ -63,7 +70,7 @@ find_package(spdlog CONFIG REQUIRED)
 
 file(GLOB_RECURSE headers CONFIGURE_DEPENDS
   "${SOURCE_DIR}/*.h"
-  "${SDK_INCLUDE_DIR}/*.h")
+  "${PUBLIC_INCLUDE_DIR}/RPS_UI_Framework/*.h")
 file(GLOB_RECURSE sources CONFIGURE_DEPENDS
   "${SOURCE_DIR}/*.cpp")
 source_group(TREE "${ROOT_DIR}" FILES ${headers} ${sources})
@@ -77,7 +84,8 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
   UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX NOMMNOSOUND)
 target_include_directories(${PROJECT_NAME} PRIVATE
   "${SOURCE_DIR}"
-  "${SDK_INCLUDE_DIR}")
+  "${PUBLIC_INCLUDE_DIR}"
+  "${RPS_FRAMEWORK_INCLUDE_DIR}")
 target_link_libraries(${PROJECT_NAME} PRIVATE
   F4VRCommon::framework
   Microsoft::DirectXTK
@@ -132,10 +140,10 @@ if(RPS_UI_FRAMEWORK_BUILD_TESTS)
   add_test(NAME RPSUIFramework.GraphicsStateCommit COMMAND RPSUIGraphicsStateCommitTests)
   # Exercise actual exported tables, registries and input subscriptions. The
   # test never installs native hooks; scene-depth demand is stubbed.
-  add_executable(RPSUIRegistryTests tests/RegistryTests.cpp src/FrameworkRuntime.cpp src/Api.cpp src/WorldDrawStore.cpp)
+  add_executable(RPSUIRegistryTests tests/RegistryTests.cpp src/FrameworkRuntime.cpp src/Api.cpp src/WorldDrawStore.cpp src/RequiredUpdates.cpp)
   target_compile_features(RPSUIRegistryTests PRIVATE cxx_std_23)
   target_compile_definitions(RPSUIRegistryTests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX NOMMNOSOUND)
-  target_include_directories(RPSUIRegistryTests PRIVATE "${SOURCE_DIR}" "${SDK_INCLUDE_DIR}")
+  target_include_directories(RPSUIRegistryTests PRIVATE "${SOURCE_DIR}" "${PUBLIC_INCLUDE_DIR}" "${RPS_FRAMEWORK_INCLUDE_DIR}")
   target_link_libraries(RPSUIRegistryTests PRIVATE F4VRCommon::framework spdlog::spdlog)
   # No test calls OpenVR; defer its import so validation needs no game DLLs.
   target_link_libraries(RPSUIRegistryTests PRIVATE delayimp)
@@ -145,17 +153,17 @@ if(RPS_UI_FRAMEWORK_BUILD_TESTS)
   add_executable(RPSUINumberOverlayTests tests/NumberOverlayTests.cpp)
   target_compile_features(RPSUINumberOverlayTests PRIVATE cxx_std_23)
   target_compile_options(RPSUINumberOverlayTests PRIVATE /UNDEBUG)
-  target_include_directories(RPSUINumberOverlayTests PRIVATE "${SOURCE_DIR}" "${SDK_INCLUDE_DIR}")
+  target_include_directories(RPSUINumberOverlayTests PRIVATE "${SOURCE_DIR}" "${PUBLIC_INCLUDE_DIR}")
   add_test(NAME RPSUIFramework.NumberOverlay COMMAND RPSUINumberOverlayTests)
   add_executable(RPSUIWorldDrawTests tests/WorldDrawTests.cpp src/WorldDrawStore.cpp)
   target_compile_features(RPSUIWorldDrawTests PRIVATE cxx_std_23)
   target_compile_options(RPSUIWorldDrawTests PRIVATE /UNDEBUG)
-  target_include_directories(RPSUIWorldDrawTests PRIVATE "${SOURCE_DIR}" "${SDK_INCLUDE_DIR}")
+  target_include_directories(RPSUIWorldDrawTests PRIVATE "${SOURCE_DIR}" "${PUBLIC_INCLUDE_DIR}")
   add_test(NAME RPSUIFramework.WorldDraw COMMAND RPSUIWorldDrawTests)
   add_executable(RPSUIPanelCooperationTests tests/PanelCooperationTests.cpp)
   target_compile_features(RPSUIPanelCooperationTests PRIVATE cxx_std_23)
   target_compile_definitions(RPSUIPanelCooperationTests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-  target_include_directories(RPSUIPanelCooperationTests PRIVATE "${SOURCE_DIR}" "${SDK_INCLUDE_DIR}")
+  target_include_directories(RPSUIPanelCooperationTests PRIVATE "${SOURCE_DIR}" "${PUBLIC_INCLUDE_DIR}")
   add_test(NAME RPSUIFramework.PanelCooperation COMMAND RPSUIPanelCooperationTests)
   add_executable(RPSUIWorldPanelDepthTests tests/WorldPanelDepthTests.cpp)
   target_compile_features(RPSUIWorldPanelDepthTests PRIVATE cxx_std_23)
@@ -169,7 +177,7 @@ if(RPS_UI_FRAMEWORK_BUILD_TESTS)
   add_test(NAME RPSUIFramework.NativeSceneTargets COMMAND RPSUINativeSceneTargetsTests)
   add_executable(RPSUIPanelSeparationTests tests/PanelSeparationTests.cpp)
   target_compile_features(RPSUIPanelSeparationTests PRIVATE cxx_std_23)
-  target_include_directories(RPSUIPanelSeparationTests PRIVATE "${SOURCE_DIR}" "${SDK_INCLUDE_DIR}")
+  target_include_directories(RPSUIPanelSeparationTests PRIVATE "${SOURCE_DIR}" "${PUBLIC_INCLUDE_DIR}")
   add_test(NAME RPSUIFramework.PanelSeparation COMMAND RPSUIPanelSeparationTests)
 
   add_executable(RPSUIFrameworkPolicyTests
@@ -183,9 +191,31 @@ if(RPS_UI_FRAMEWORK_BUILD_TESTS)
   target_compile_features(RPSUIFrameworkPolicyTests PRIVATE cxx_std_23)
   target_include_directories(RPSUIFrameworkPolicyTests PRIVATE
     "${SOURCE_DIR}"
-    "${SDK_INCLUDE_DIR}")
+    "${PUBLIC_INCLUDE_DIR}")
   add_test(NAME RPSUIFramework.Policy
     COMMAND RPSUIFrameworkPolicyTests)
+
+  # Every public header compiled on its own under a hostile packing, plus the
+  # minimal consumer. The headers' static_asserts are the ABI layout checks.
+  file(GLOB RPSUI_PUBLIC_HEADERS CONFIGURE_DEPENDS "${PUBLIC_INCLUDE_DIR}/RPS_UI_Framework/*.h")
+  set(RPSUI_PUBLIC_HEADER_SOURCES)
+  foreach(RPSUI_PUBLIC_HEADER IN LISTS RPSUI_PUBLIC_HEADERS)
+    get_filename_component(RPSUI_PUBLIC_HEADER_NAME "${RPSUI_PUBLIC_HEADER}" NAME_WE)
+    set(RPSUI_PUBLIC_HEADER_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/public_header_tests/${RPSUI_PUBLIC_HEADER_NAME}.cpp")
+    file(CONFIGURE OUTPUT "${RPSUI_PUBLIC_HEADER_SOURCE}"
+      CONTENT "#pragma pack(push, 1)\n#include <RPS_UI_Framework/${RPSUI_PUBLIC_HEADER_NAME}.h>\n#pragma pack(pop)\n")
+    list(APPEND RPSUI_PUBLIC_HEADER_SOURCES "${RPSUI_PUBLIC_HEADER_SOURCE}")
+  endforeach()
+  add_executable(RPSUIPublicHeaderTests ${RPSUI_PUBLIC_HEADER_SOURCES} tests/ConsumerExample.cpp)
+  set_target_properties(RPSUIPublicHeaderTests PROPERTIES INCLUDE_DIRECTORIES "${PUBLIC_INCLUDE_DIR}")
+  target_compile_features(RPSUIPublicHeaderTests PRIVATE cxx_std_20)
+  target_compile_options(RPSUIPublicHeaderTests PRIVATE /W4 /permissive-)
+  add_test(NAME RPSUIFramework.PublicHeaders COMMAND RPSUIPublicHeaderTests)
+  add_executable(RPSUIDiscoveryTests tests/DiscoveryTests.cpp)
+  target_compile_features(RPSUIDiscoveryTests PRIVATE cxx_std_23)
+  target_compile_options(RPSUIDiscoveryTests PRIVATE /UNDEBUG)
+  target_include_directories(RPSUIDiscoveryTests PRIVATE "${SOURCE_DIR}" "${PUBLIC_INCLUDE_DIR}")
+  add_test(NAME RPSUIFramework.Discovery COMMAND RPSUIDiscoveryTests)
 
   find_program(PWSH_EXECUTABLE NAMES pwsh REQUIRED)
   add_test(NAME RPSUIFramework.SourceContracts

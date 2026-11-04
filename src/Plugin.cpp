@@ -3,6 +3,7 @@
 #include "FrameworkRuntime.h"
 #include "InputService.h"
 #include "Logger.h"
+#include "RequiredUpdates.h"
 #include "render/RenderHooks.h"
 #include "render/SceneDepthCapture.h"
 
@@ -103,10 +104,13 @@ namespace
         }
 
         reportRuntimeModules();
+        // Before any early return below: a version mismatch stops the game even
+        // when the host itself cannot start.
+        rpsui::required_updates::watch();
 
         auto& runtime = rpsui::FrameworkRuntime::get();
         if (!rpsui::render::SceneDepthCapture::Install()) {
-            runtime.setHookStatus(rpsui::sdk::HookStatusV1::Unavailable);
+            runtime.setHookStatus(rpsui::api::cooperation::HookStatus::Unavailable);
             rpsui::log::critical(
                 "RPS UI Framework requires guarded same-frame scene depth");
             return;
@@ -114,14 +118,14 @@ namespace
         const auto hooks = rpsui::render::RenderHooks::Install();
         if (hooks != rpsui::render::RenderHooks::InstallResult::Installed) {
             runtime.setHookStatus(hooks == rpsui::render::RenderHooks::InstallResult::Conflict ?
-                rpsui::sdk::HookStatusV1::Conflict : rpsui::sdk::HookStatusV1::Unavailable);
+                rpsui::api::cooperation::HookStatus::Conflict : rpsui::api::cooperation::HookStatus::Unavailable);
             rpsui::log::critical(
                 "RPS UI Framework stereo submission unavailable; cooperating UI mods must use "
                 "the panel callback API instead of replacing the same submission callsites");
             return;
         }
 
-        runtime.setHookStatus(rpsui::sdk::HookStatusV1::Installed);
+        runtime.setHookStatus(rpsui::api::cooperation::HookStatus::Installed);
         runtime.setRendererReady(true);
         if (!runtime.start()) {
             rpsui::log::critical(

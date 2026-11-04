@@ -1,5 +1,5 @@
 #include "NumberOverlayLayout.h"
-#include "RPSUINumberOverlayApi.h"
+#include <RPS_UI_Framework/NumberOverlay.h>
 #include <cassert>
 #include <limits>
 #include <utility>
@@ -61,13 +61,4 @@ int main()
     assert(!hudLayout(1,2,false,atlas,0,480).glyphCount);
     assert(!hudLayout(1,2,false,{0.5f,0.5f,0.45f},1024,480).glyphCount);
 
-    // The style fields follow the original record, so a caller built before
-    // them passes the base size and the host reads none of them.
-    static_assert(sizeof(rpsui::sdk::NumberOverlayApiV1)==40);
-    static_assert(offsetof(rpsui::sdk::NumberOverlayApiV1,registerOverlay)==16);
-    static_assert(offsetof(rpsui::sdk::NumberOverlayPresentationV1,value)==72);
-    static_assert(rpsui::sdk::RPSUI_NUMBER_OVERLAY_PRESENTATION_BASE_SIZE==88);
-    static_assert(offsetof(rpsui::sdk::NumberOverlayPresentationV1,secondaryValue)==100);
-    static_assert(offsetof(rpsui::sdk::NumberOverlayPresentationV1,style)==104);
-    static_assert(sizeof(rpsui::sdk::NumberOverlayPresentationV1)==112);
 }

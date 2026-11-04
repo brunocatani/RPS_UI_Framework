@@ -781,7 +781,7 @@ namespace rpsui::render
                 return false;
             }
             const auto layout=number_overlay::hudLayout(panel.number,panel.numberLook.secondaryValue,
-                panel.numberLook.style==sdk::NumberOverlayStyleV1::HudBracketed,state.hudMetrics,
+                panel.numberLook.style==api::number_overlay::Style::HudBracketed,state.hudMetrics,
                 static_cast<float>(panel.pixelWidth),static_cast<float>(panel.pixelHeight));
             beginNumberPass(state,panel,state.hudAtlas.Get());
             const auto color=numberColor(panel);
@@ -803,7 +803,7 @@ namespace rpsui::render
 
         bool renderNumberPanel(Resources& state,const RenderPanelSnapshot& panel)
         {
-            if (panel.numberLook.style!=sdk::NumberOverlayStyleV1::Plain) return renderHudNumberPanel(state,panel);
+            if (panel.numberLook.style!=api::number_overlay::Style::Plain) return renderHudNumberPanel(state,panel);
             const bool firstAttempt=!state.digitAtlasFailed;
             if (!ensureDigitAtlas(state)) {
                 if (firstAttempt) log::error("Numeric overlay glyph atlas creation failed");
@@ -847,12 +847,12 @@ namespace rpsui::render
                 0.055f,
                 1.0f,
             };
-            if (sdk::hasPanelFlag(panel.flags, sdk::PanelFlagV1::Transparent)) clear.fill(0.0f);
+            if (api::framework::hasPanelFlag(panel.flags, api::framework::PanelFlag::Transparent)) clear.fill(0.0f);
             state.context->ClearRenderTargetView(
                 renderTarget,
                 clear.data());
 
-            rpsui::sdk::PanelRenderFrameV1 frame{};
+            rpsui::api::framework::PanelRenderFrame frame{};
             frame.panelHandle = panel.panelHandle;
             frame.frameSequence = state.frameSequence;
             frame.deviceGeneration = state.deviceGeneration;

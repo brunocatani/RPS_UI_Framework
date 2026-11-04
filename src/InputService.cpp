@@ -13,7 +13,7 @@ namespace {
 constexpr std::uint64_t trigger=1ull<<33,grip=1ull<<2,accept=1ull<<7;
 constexpr unsigned maxClients=static_cast<unsigned>(kInputSubscriberCapacity);
 struct Client {
- std::uint64_t token{};sdk::InputCallbackV1 callback{};void* context{};
+ std::uint64_t token{};api::input::Callback callback{};void* context{};
  std::shared_ptr<PanelCallbackGate> gate;
  bool closing{};std::uint64_t renewed{};
 };
@@ -29,7 +29,7 @@ struct State {
  std::array<std::atomic_uint64_t,(maxClients+1+63)/64> activeMasks{};
  std::vector<unsigned> liveClients; // Protected by mutex; slots stay stable.
  std::vector<Client> callbacks; // Reused exclusively by the existing game tick.
- sdk::InputFrameV1 frame;
+ api::input::Frame frame;
  std::array<std::array<float,3>,2> aim{{{0,1,0},{0,1,0}}};
  std::atomic_bool installed{},session{},allowPollCapture{};
  std::atomic_uint32_t devices[2]{vr::k_unTrackedDeviceIndexInvalid,vr::k_unTrackedDeviceIndexInvalid};
@@ -115,13 +115,13 @@ bool blockedMenu() {
  for(const auto& name:names)if(ui->GetMenuOpen(name))return true;
  return false;
 }
-unsigned nativeHand(std::uintptr_t player,std::uintptr_t offset,sdk::HandInputV1& hand,const std::array<float,3>& aim) {
+unsigned nativeHand(std::uintptr_t player,std::uintptr_t offset,api::input::HandInput& hand,const std::array<float,3>& aim) {
  std::uintptr_t node{};RE::NiTransform transform{};
  if(!read(player+offset,node) || node<0x10000 || node>0x00007fffffffffff || node%alignof(void*))return 1;
  if(!read(node+offsetof(RE::NiAVObject,world),transform))return 2;
  return input_policy::nativeWandPose(transform,hand,aim)?0:3;
 }
-void publishMask(unsigned slot,const sdk::InputCaptureV1& capture) {
+void publishMask(unsigned slot,const api::input::Capture& capture) {
  auto& s=state();for(unsigned hand=0;hand<2;++hand){s.masks[slot].buttons[hand]=capture.buttons[hand];s.masks[slot].chord[hand]=capture.chord[hand];}
  const auto bit=std::uint64_t{1}<<(slot%64);
  if(capture.buttons[0] || capture.buttons[1] || capture.chord[0] || capture.chord[1])
@@ -144,7 +144,7 @@ void update() {
   else {
    s.frame.leftHanded=leftHanded!=0;
    for(unsigned side=0;side<2;++side) {
-    auto& hand=s.frame.hands[side];const bool primary=(side==0)==s.frame.leftHanded;
+    auto& hand=s.frame.hands[side];const bool primary=(side==0)==(s.frame.leftHanded!=0);
     const auto device=system->GetTrackedDeviceIndexForControllerRole(side?vr::TrackedControllerRole_RightHand:vr::TrackedControllerRole_LeftHand);s.devices[side]=device;
     vr::VRControllerState_t raw{};
     selfRead=true;const bool valid=device!=vr::k_unTrackedDeviceIndexInvalid && system->GetControllerState(device,&raw,sizeof(raw));selfRead=false;
@@ -172,7 +172,7 @@ void tick(std::uint64_t argument) {
  originalTick(argument);
  safeUpdate();
 }
-std::uint64_t RPSUI_CALL subscribe(sdk::InputCallbackV1 callback,void* context) noexcept {
+std::uint64_t RPSUI_CALL subscribe(api::input::Callback callback,void* context) noexcept {
  try{if(!callback)return 0;auto& s=state();std::scoped_lock lock(s.mutex);
   for(unsigned i=0;i<maxClients;++i){auto& client=s.clients[i];if(!client.token && s.nextToken!=UINT64_MAX){Client value;value.gate=std::make_shared<PanelCallbackGate>();value.token=s.nextToken++;value.callback=callback;value.context=context;client=std::move(value);s.liveClients.insert(std::lower_bound(s.liveClients.begin(),s.liveClients.end(),i),i);return client.token;}}
  }catch(...){log::error("UI input subscription failed");}return 0;
@@ -181,8 +181,8 @@ bool RPSUI_CALL unsubscribe(std::uint64_t token) noexcept {
  auto& s=state();std::scoped_lock lock(s.mutex);
  for(unsigned i=0;i<maxClients;++i)if(s.clients[i].token==token && token){s.clients[i].closing=true;publishMask(i+1,{});if(!s.clients[i].gate->close())return false;s.clients[i]={};std::erase(s.liveClients,i);return true;}return false;
 }
-bool RPSUI_CALL setPointerAim(const sdk::PointerAimV1* value) noexcept {
- if(!value || value->structSize!=sizeof(*value))return false;
+bool RPSUI_CALL setPointerAim(const api::input::PointerAim* value) noexcept {
+ if(!value || value->size!=sizeof(*value) || value->version!=api::kRecordVersion)return false;
  std::array<std::array<float,3>,2> aim;
  for(unsigned side=0;side<2;++side) {
   const float pitch=value->pitchDegrees[side],yaw=value->yawDegrees[side];
@@ -193,8 +193,8 @@ bool RPSUI_CALL setPointerAim(const sdk::PointerAimV1* value) noexcept {
  log::info("UI pointer aim degrees: left pitch={} yaw={}, right pitch={} yaw={}",value->pitchDegrees[0],value->yawDegrees[0],value->pitchDegrees[1],value->yawDegrees[1]);
  return true;
 }
-bool RPSUI_CALL capture(std::uint64_t token,const sdk::InputCaptureV1* request) noexcept {
- if(!request || request->structSize!=sizeof(*request))return false;
+bool RPSUI_CALL capture(std::uint64_t token,const api::input::Capture* request) noexcept {
+ if(!request || request->size!=sizeof(*request) || request->version!=api::kRecordVersion)return false;
  constexpr auto allowed=(1ull<<1)|(1ull<<2)|(1ull<<7)|(1ull<<32)|(1ull<<33);
  for(unsigned hand=0;hand<2;++hand)if((request->buttons[hand]|request->chord[hand])&~allowed)return false;
  auto& s=state();std::scoped_lock lock(s.mutex);
@@ -223,7 +223,7 @@ bool installed() noexcept{return state().installed.load();}
 void sessionReady(bool ready) noexcept{state().session=ready;if(!ready)state().allowPollCapture=false;}
 bool rawButton(unsigned hand,unsigned button) noexcept{return hand<2 && button<64 && (state().frame.hands[hand].pressed&(1ull<<button));}
 void publishHostCapture() noexcept {
- auto& s=state();sdk::InputCaptureV1 request;
+ auto& s=state();api::input::Capture request;
  for(unsigned side=0;side<2;++side)if(s.hostCapture[side])
   request.buttons[side]=trigger|accept|(s.hostStick[side]?(1ull<<32):0)|(s.hostConfig[side]?grip:0);
  publishMask(0,request);
@@ -236,7 +236,7 @@ bool captureHost(unsigned hand,bool active,bool configNavigation,bool captureSti
  // the player. Raw UI sampling remains unfiltered.
  if(!s.hostFrame)publishHostCapture();return true;
 }
+const api::input::Api& table() noexcept {
+ static const api::input::Api api{.subscribe=&subscribe,.unsubscribe=&unsubscribe,.capture=&capture,.rawInputReadActive=&rawInputReadActive,.capturedButtons=&capturedButtons,.setPointerAim=&setPointerAim};return api;
 }
-extern "C" __declspec(dllexport) const rpsui::sdk::InputApiV1* RPSUI_CALL RPSUI_RequestInputApi() noexcept {
- static const rpsui::sdk::InputApiV1 api{.subscribe=&rpsui::input::subscribe,.unsubscribe=&rpsui::input::unsubscribe,.capture=&rpsui::input::capture,.rawInputReadActive=&rpsui::input::rawInputReadActive,.capturedButtons=&rpsui::input::capturedButtons,.setPointerAim=&rpsui::input::setPointerAim};return &api;
 }

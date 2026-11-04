@@ -5,7 +5,7 @@
 #include "PointerClickGate.h"
 #include "PointerHandSelection.h"
 #include "PointerPanelIntersection.h"
-#include "RPSUIFrameworkApi.h"
+#include <RPS_UI_Framework/Framework.h>
 #include "render/EngineStereoSubmissionPolicy.h"
 
 #include <chrono>
@@ -42,7 +42,7 @@ namespace
                 const float sy = std::sin(yaw), cy = std::cos(yaw);
                 const float sp = std::sin(pitch), cp = std::cos(pitch);
                 transform.rotate = {{{cy, -sy, 0, 0}, {sy * cp, cy * cp, sp, 0}, {-sy * sp, -cy * sp, cp, 0}}};
-                rpsui::sdk::HandInputV1 hand;
+                rpsui::api::input::HandInput hand;
                 require(rpsui::input_policy::nativeWandPose(transform, hand), "valid native wand pose rejected");
                 const Vector origin{hand.position[0], hand.position[1], hand.position[2]};
                 const Vector direction{hand.forward[0], hand.forward[1], hand.forward[2]};
@@ -58,7 +58,7 @@ namespace
                     "native pointer missed aimed-at panel after controller yaw/pitch");
             }
         }
-        rpsui::sdk::HandInputV1 hand;
+        rpsui::api::input::HandInput hand;
         transform.rotate = {{{1,0,0,0},{0,0,1,0},{0,-1,0,0}}};
         require(rpsui::input_policy::nativeWandPose(transform, hand) && std::fabs(hand.forward[2]-1) < .001f,
             "upward controller fixture does not reproduce the reported aim");
@@ -79,26 +79,19 @@ namespace
 
     void testApiContract()
     {
-        using namespace rpsui::sdk;
-        static_assert(offsetof(InputApiV1, capturedButtons) == 40);
-        static_assert(offsetof(InputApiV1, setPointerAim) == 48);
-        static_assert(sizeof(PanelRegistrationV1) == 248);
-        static_assert(sizeof(PanelRenderFrameV1) == 144);
-        static_assert(offsetof(PanelRenderFrameV1, backDown) == 106);
-        static_assert(offsetof(PanelRegistrationV1, flags) == 192);
-        static_assert(offsetof(PanelRegistrationV1, renderCallback) == 200);
-        require(RPSUI_API_VERSION == 1, "API version changed");
-        const auto circle = static_cast<std::uint32_t>(PanelFlagV1::CircularInput);
-        require(panelContains(0, 0.01f, 0.01f), "existing rectangle lost its corner");
-        require(!panelContains(circle, 0.01f, 0.01f), "circular panel captured a transparent corner");
-        require(panelContains(circle, 0.5f, 0.5f), "circular panel lost its center");
-        require(panelContains(circle, 0.5f, 0.0f), "circular panel lost its edge");
-        require(sizeof(PanelRenderFrameV1) >= 120, "render frame ABI shrank");
+        using namespace rpsui::api;
+        static_assert(offsetof(input::Api, capturedButtons) == 32);
+        static_assert(offsetof(input::Api, setPointerAim) == 40);
+        static_assert(offsetof(framework::PanelRenderFrame, backDown) == 106);
+        static_assert(offsetof(framework::PanelRegistration, flags) == 192);
+        static_assert(offsetof(framework::PanelRegistration, renderCallback) == 200);
+        const auto circle = static_cast<std::uint32_t>(framework::PanelFlag::CircularInput);
+        require(framework::panelContains(0, 0.01f, 0.01f), "existing rectangle lost its corner");
+        require(!framework::panelContains(circle, 0.01f, 0.01f), "circular panel captured a transparent corner");
+        require(framework::panelContains(circle, 0.5f, 0.5f), "circular panel lost its center");
+        require(framework::panelContains(circle, 0.5f, 0.0f), "circular panel lost its edge");
         require(
-            featureMask(FeatureV1::MultipleWorldPanels) != 0,
-            "multi-panel feature missing");
-        require(
-            static_cast<std::uint32_t>(ResizeHandleV1::BottomRight) ==
+            static_cast<std::uint32_t>(framework::ResizeHandle::BottomRight) ==
                 static_cast<std::uint32_t>(
                     rpsui::panel_resize::Handle::BottomRight),
             "resize handle ABI disagrees with host policy");

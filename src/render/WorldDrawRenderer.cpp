@@ -513,7 +513,7 @@ float4 main(PS_INPUT input) : SV_Target {
                         state.instanceScratch.push_back(instance(draw.transform, draw.color));
                     }
                     drawMeshInstances(state, context, *mesh, state.instanceScratch,
-                        first.fill == sdk::WorldFillV1::Solid ? state.solid.Get() : state.wire.Get());
+                        first.fill == api::world_draw::Fill::Solid ? state.solid.Get() : state.wire.Get());
                 }
                 start = end;
             }
@@ -521,7 +521,7 @@ float4 main(PS_INPUT input) : SV_Target {
 
         void drawSpheres(Resources& state, ID3D11DeviceContext* context, const world_draw::RenderBatch& batch)
         {
-            for (const auto fill : { sdk::WorldFillV1::Solid, sdk::WorldFillV1::Wire }) {
+            for (const auto fill : { api::world_draw::Fill::Solid, api::world_draw::Fill::Wire }) {
                 state.instanceScratch.clear();
                 for (const auto& sphere : batch.spheres) {
                     if (sphere.fill != fill) continue;
@@ -533,7 +533,7 @@ float4 main(PS_INPUT input) : SV_Target {
                     state.instanceScratch.push_back(data);
                 }
                 drawMeshInstances(state, context, state.unitSphere, state.instanceScratch,
-                    fill == sdk::WorldFillV1::Solid ? state.solid.Get() : state.wire.Get());
+                    fill == api::world_draw::Fill::Solid ? state.solid.Get() : state.wire.Get());
             }
         }
 
@@ -653,7 +653,7 @@ float4 main(PS_INPUT input) : SV_Target {
             vertices.insert(vertices.end(), { a, b, c, a, c, d });
         }
 
-        void appendGlyphs(std::vector<ColoredVertex>& vertices, const sdk::WorldTextV1& text, float baseX,
+        void appendGlyphs(std::vector<ColoredVertex>& vertices, const api::world_draw::Text& text, float baseX,
             float baseY, float maxX, float width, float height)
         {
             constexpr float kGlyphColumns = 5.0f;
@@ -675,7 +675,7 @@ float4 main(PS_INPUT input) : SV_Target {
             }
         }
 
-        [[nodiscard]] bool projectAnchor(const sdk::WorldTextV1& text, const DirectX::XMFLOAT4X4& composite,
+        [[nodiscard]] bool projectAnchor(const api::world_draw::Text& text, const DirectX::XMFLOAT4X4& composite,
             const DirectX::XMFLOAT4& origin, std::uint32_t eye, float width, float height, float& outX,
             float& outY) noexcept
         {

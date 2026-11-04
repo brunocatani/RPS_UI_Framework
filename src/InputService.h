@@ -1,7 +1,9 @@
 #pragma once
-#include "RPSUIInputApi.h"
+#include <RPS_UI_Framework/Input.h>
 
 namespace rpsui::input {
+// The published Input interface's table.
+const api::input::Api& table() noexcept;
 bool start() noexcept;
 bool installed() noexcept;
 void sessionReady(bool ready) noexcept;

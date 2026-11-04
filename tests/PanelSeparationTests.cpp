@@ -4,7 +4,7 @@
 void check(bool value){if(!value)throw std::runtime_error("Panel separation assertion failed");}
 int main(){try {
  using namespace rpsui;
- sdk::PanelPoseV1 wheel,config;wheel.physicalWidth=95;wheel.physicalHeight=95;
+ api::framework::PanelPose wheel,config;wheel.physicalWidth=95;wheel.physicalHeight=95;
  config.physicalWidth=96;config.physicalHeight=60;
  config.center[0]=99.5f;
  check(panel_separation::haveInPlaneGap(wheel,config)); // Four-unit edge gap, previously shifted again.

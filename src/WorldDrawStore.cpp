@@ -8,7 +8,7 @@ namespace rpsui::world_draw
 {
     namespace
     {
-        using sdk::ResultV1;
+        using api::Result;
 
         std::atomic<std::uint64_t> g_frame{ 0 };
 
@@ -20,29 +20,29 @@ namespace rpsui::world_draw
             return true;
         }
 
-        [[nodiscard]] bool validFill(sdk::WorldFillV1 fill) noexcept
+        [[nodiscard]] bool validFill(api::world_draw::Fill fill) noexcept
         {
-            return fill == sdk::WorldFillV1::Solid || fill == sdk::WorldFillV1::Wire;
+            return fill == api::world_draw::Fill::Solid || fill == api::world_draw::Fill::Wire;
         }
 
-        [[nodiscard]] bool valid(const sdk::WorldSphereV1& sphere) noexcept
+        [[nodiscard]] bool valid(const api::world_draw::Sphere& sphere) noexcept
         {
             return finite(sphere.center, 3) && finite(sphere.color, 4) &&
                 std::isfinite(sphere.radius) && sphere.radius > 0.0f && validFill(sphere.fill);
         }
 
-        [[nodiscard]] bool valid(const sdk::WorldLineV1& line) noexcept
+        [[nodiscard]] bool valid(const api::world_draw::Line& line) noexcept
         {
             return finite(line.start, 3) && finite(line.end, 3) && finite(line.color, 4);
         }
 
-        [[nodiscard]] bool valid(const sdk::WorldTextV1& text) noexcept
+        [[nodiscard]] bool valid(const api::world_draw::Text& text) noexcept
         {
             return finite(text.anchor, 3) && finite(text.offsetPixels, 2) && finite(text.color, 4) &&
                 std::isfinite(text.pixelSize) && text.pixelSize > 0.0f;
         }
 
-        [[nodiscard]] bool valid(const sdk::WorldMeshInstanceV1& instance) noexcept
+        [[nodiscard]] bool valid(const api::world_draw::MeshInstance& instance) noexcept
         {
             return finite(instance.transform, 16) && finite(instance.color, 4) && validFill(instance.fill);
         }
@@ -120,19 +120,19 @@ namespace rpsui::world_draw
         });
     }
 
-    ResultV1 Store::setFrameCallback(std::uint64_t owner, sdk::WorldDrawFrameCallbackV1 callback,
+    Result Store::setFrameCallback(std::uint64_t owner, api::world_draw::FrameCallback callback,
         void* context) noexcept
     {
         try {
             auto gate = callback ? std::make_shared<PanelCallbackGate>() : nullptr;
             std::scoped_lock lock(mutex_);
             auto* state = findLocked(owner);
-            if (!state) return ResultV1::OwnerNotRegistered;
+            if (!state) return Result::OwnerNotRegistered;
             const auto previous = std::move(state->frameCallback.gate);
             state->frameCallback = { callback, callback ? context : nullptr, std::move(gate) };
-            return !previous || previous->close() ? ResultV1::Ok : ResultV1::CallbackBusy;
+            return !previous || previous->close() ? Result::Ok : Result::CallbackBusy;
         } catch (...) {
-            return ResultV1::InternalError;
+            return Result::InternalError;
         }
     }
 
@@ -162,74 +162,74 @@ namespace rpsui::world_draw
         std::erase_if(owners_, [owner](const OwnerState& state) { return state.owner == owner; });
     }
 
-    ResultV1 Store::submit(std::uint64_t owner, const sdk::WorldDrawPublicationV1& publication,
+    Result Store::submit(std::uint64_t owner, const api::world_draw::Publication& publication,
         std::uint64_t frame) noexcept
     {
-        if (publication.structSize < sizeof(sdk::WorldDrawPublicationV1)) return ResultV1::InvalidArgument;
-        if (publication.apiVersion != sdk::RPSUI_WORLD_DRAW_VERSION) return ResultV1::VersionMismatch;
-        if (publication.leaseFrames == 0 || publication.leaseFrames > sdk::RPSUI_WORLD_DRAW_MAX_LEASE_FRAMES) {
-            return ResultV1::InvalidArgument;
+        if (publication.size < sizeof(api::world_draw::Publication)) return Result::InvalidArgument;
+        if (publication.version != api::kRecordVersion) return Result::VersionMismatch;
+        if (publication.leaseFrames == 0 || publication.leaseFrames > api::world_draw::kMaxLeaseFrames) {
+            return Result::InvalidArgument;
         }
-        if (publication.sphereCount > sdk::RPSUI_WORLD_DRAW_MAX_SPHERES ||
-            publication.lineCount > sdk::RPSUI_WORLD_DRAW_MAX_LINES ||
-            publication.textCount > sdk::RPSUI_WORLD_DRAW_MAX_TEXTS ||
-            publication.meshInstanceCount > sdk::RPSUI_WORLD_DRAW_MAX_MESH_INSTANCES) {
-            return ResultV1::CapacityReached;
+        if (publication.sphereCount > api::world_draw::kMaxSpheres ||
+            publication.lineCount > api::world_draw::kMaxLines ||
+            publication.textCount > api::world_draw::kMaxTexts ||
+            publication.meshInstanceCount > api::world_draw::kMaxMeshInstances) {
+            return Result::CapacityReached;
         }
         try {
             std::scoped_lock lock(mutex_);
             auto* state = findLocked(owner);
-            if (!state) return ResultV1::OwnerNotRegistered;
+            if (!state) return Result::OwnerNotRegistered;
             state->published = false;
             if (!copyArray(state->spheres, publication.spheres, publication.sphereCount,
-                    sdk::RPSUI_WORLD_DRAW_MAX_SPHERES) ||
+                    api::world_draw::kMaxSpheres) ||
                 !copyArray(state->lines, publication.lines, publication.lineCount,
-                    sdk::RPSUI_WORLD_DRAW_MAX_LINES) ||
+                    api::world_draw::kMaxLines) ||
                 !copyArray(state->texts, publication.texts, publication.textCount,
-                    sdk::RPSUI_WORLD_DRAW_MAX_TEXTS) ||
+                    api::world_draw::kMaxTexts) ||
                 !copyArray(state->meshInstances, publication.meshInstances, publication.meshInstanceCount,
-                    sdk::RPSUI_WORLD_DRAW_MAX_MESH_INSTANCES)) {
+                    api::world_draw::kMaxMeshInstances)) {
                 state->spheres.clear();
                 state->lines.clear();
                 state->texts.clear();
                 state->meshInstances.clear();
-                return ResultV1::InvalidArgument;
+                return Result::InvalidArgument;
             }
-            for (auto& text : state->texts) text.text[sdk::RPSUI_WORLD_DRAW_TEXT_CAPACITY - 1] = '\0';
+            for (auto& text : state->texts) text.text[api::world_draw::kTextCapacity - 1] = '\0';
             state->expiresAfterFrame = frame + publication.leaseFrames;
             state->published = !state->spheres.empty() || !state->lines.empty() ||
                 !state->texts.empty() || !state->meshInstances.empty();
-            return ResultV1::Ok;
+            return Result::Ok;
         } catch (...) {
-            return ResultV1::InternalError;
+            return Result::InternalError;
         }
     }
 
-    ResultV1 Store::clear(std::uint64_t owner) noexcept
+    Result Store::clear(std::uint64_t owner) noexcept
     {
         std::scoped_lock lock(mutex_);
         auto* state = findLocked(owner);
-        if (!state) return ResultV1::OwnerNotRegistered;
+        if (!state) return Result::OwnerNotRegistered;
         state->published = false;
         state->spheres.clear();
         state->lines.clear();
         state->texts.clear();
         state->meshInstances.clear();
-        return ResultV1::Ok;
+        return Result::Ok;
     }
 
-    ResultV1 Store::registerMesh(std::uint64_t owner, std::uint64_t meshId, const sdk::WorldMeshV1& mesh) noexcept
+    Result Store::registerMesh(std::uint64_t owner, std::uint64_t meshId, const api::world_draw::Mesh& mesh) noexcept
     {
-        if (mesh.structSize < sizeof(sdk::WorldMeshV1)) return ResultV1::InvalidArgument;
-        if (mesh.apiVersion != sdk::RPSUI_WORLD_DRAW_VERSION) return ResultV1::VersionMismatch;
+        if (mesh.size < sizeof(api::world_draw::Mesh)) return Result::InvalidArgument;
+        if (mesh.version != api::kRecordVersion) return Result::VersionMismatch;
         if (!mesh.positions || !mesh.indices || mesh.vertexCount == 0 ||
-            mesh.vertexCount > sdk::RPSUI_WORLD_DRAW_MAX_MESH_VERTICES || mesh.indexCount == 0 ||
-            mesh.indexCount > sdk::RPSUI_WORLD_DRAW_MAX_MESH_INDICES || (mesh.indexCount % 3) != 0 ||
+            mesh.vertexCount > api::world_draw::kMaxMeshVertices || mesh.indexCount == 0 ||
+            mesh.indexCount > api::world_draw::kMaxMeshIndices || (mesh.indexCount % 3) != 0 ||
             !finite(mesh.positions, static_cast<std::size_t>(mesh.vertexCount) * 3)) {
-            return ResultV1::InvalidArgument;
+            return Result::InvalidArgument;
         }
         for (std::uint32_t index = 0; index < mesh.indexCount; ++index) {
-            if (mesh.indices[index] >= mesh.vertexCount) return ResultV1::InvalidArgument;
+            if (mesh.indices[index] >= mesh.vertexCount) return Result::InvalidArgument;
         }
         const std::uint64_t bytes = static_cast<std::uint64_t>(mesh.vertexCount) * 3 * sizeof(float) +
             static_cast<std::uint64_t>(mesh.indexCount) * sizeof(std::uint32_t);
@@ -240,38 +240,38 @@ namespace rpsui::world_draw
 
             std::scoped_lock lock(mutex_);
             auto* state = findLocked(owner);
-            if (!state) return ResultV1::OwnerNotRegistered;
+            if (!state) return Result::OwnerNotRegistered;
             std::uint64_t replacedBytes = 0;
             const auto existing = state->meshes.find(meshId);
             if (existing != state->meshes.end()) {
                 replacedBytes = existing->second->positions.size() * sizeof(float) +
                     existing->second->indices.size() * sizeof(std::uint32_t);
-            } else if (state->meshes.size() >= sdk::RPSUI_WORLD_DRAW_MAX_MESHES) {
-                return ResultV1::CapacityReached;
+            } else if (state->meshes.size() >= api::world_draw::kMaxMeshes) {
+                return Result::CapacityReached;
             }
-            if (state->meshBytes - replacedBytes + bytes > sdk::RPSUI_WORLD_DRAW_MAX_MESH_BYTES) {
-                return ResultV1::CapacityReached;
+            if (state->meshBytes - replacedBytes + bytes > api::world_draw::kMaxMeshBytes) {
+                return Result::CapacityReached;
             }
             geometry->revision = nextRevision_++;
             state->meshes[meshId] = std::move(geometry);
             state->meshBytes = state->meshBytes - replacedBytes + bytes;
-            return ResultV1::Ok;
+            return Result::Ok;
         } catch (...) {
-            return ResultV1::InternalError;
+            return Result::InternalError;
         }
     }
 
-    ResultV1 Store::releaseMesh(std::uint64_t owner, std::uint64_t meshId) noexcept
+    Result Store::releaseMesh(std::uint64_t owner, std::uint64_t meshId) noexcept
     {
         std::scoped_lock lock(mutex_);
         auto* state = findLocked(owner);
-        if (!state) return ResultV1::OwnerNotRegistered;
+        if (!state) return Result::OwnerNotRegistered;
         const auto found = state->meshes.find(meshId);
-        if (found == state->meshes.end()) return ResultV1::InvalidArgument;
+        if (found == state->meshes.end()) return Result::InvalidArgument;
         state->meshBytes -= found->second->positions.size() * sizeof(float) +
             found->second->indices.size() * sizeof(std::uint32_t);
         state->meshes.erase(found);
-        return ResultV1::Ok;
+        return Result::Ok;
     }
 
     bool Store::snapshot(std::uint64_t frame, RenderBatch& out) const noexcept
