@@ -10,7 +10,8 @@
 
 namespace rpsui::input {
 namespace {
-constexpr std::uint64_t trigger=1ull<<33,grip=1ull<<2,accept=1ull<<7;
+// Touch-style controllers report Axis2 alongside the grip button; the game reads both.
+constexpr std::uint64_t trigger=1ull<<33,grip=(1ull<<2)|(1ull<<34),accept=1ull<<7;
 constexpr unsigned maxClients=static_cast<unsigned>(kInputSubscriberCapacity);
 struct Client {
  std::uint64_t token{};api::input::Callback callback{};void* context{};

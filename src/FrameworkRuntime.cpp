@@ -907,7 +907,7 @@ namespace rpsui
     bool FrameworkRuntime::requestInputSuppressionLocked(
         const api::input::Frame& snapshot, pointer_hand_selection::Hand hand) noexcept
     {
-        bool config = false;
+        bool config = handState_[handIndex(hand)].backPressDrain;
         for (const auto index : openPanels_)
             config |= api::framework::hasPanelFlag(panels_[index].flags, api::framework::PanelFlag::ConfigNavigation);
         const bool accepted=input::captureHost(static_cast<unsigned>(handIndex(hand)), snapshot.ready, config);
@@ -933,12 +933,14 @@ namespace rpsui
             panels_[index].input = {};
         }
         for (auto& state : handState_) {
+            // A panel closing on a press edge must not hand the rest of that press to the game.
+            state.focusedPressDrain |= state.clickGate.leaseAccepted && state.rawPrimaryPrevious;
+            state.backPressDrain |= state.backGate.neutralObserved && state.rawGripPrevious;
             pointer_click_gate::reset(state.clickGate);
             pointer_click_gate::reset(state.backGate);
             state.rawPrimaryPrevious = false;
             state.gameplayPressLatched = false;
             state.focusedPanel = 0;
-            state.focusedPressDrain = false;
         }
         for (auto& scroll : scrollState_) {
             contextual_scroll::reset(scroll);
@@ -1006,7 +1008,8 @@ namespace rpsui
             sample.configNavigation = hitPanel && api::framework::hasPanelFlag(hitPanel->flags, api::framework::PanelFlag::ConfigNavigation);
             sample.stick = {transform.stick[0], transform.stick[1]};
             sample.rawBackAvailable = sample.configNavigation && transform.valid;
-            sample.rawBackDown = sample.rawBackAvailable && input::rawButton(static_cast<unsigned>(index), 2);
+            sample.rawGripDown = transform.valid && input::rawButton(static_cast<unsigned>(index), 2);
+            sample.rawBackDown = sample.rawBackAvailable && sample.rawGripDown;
             sample.rawAvailable = transform.valid;
             sample.rawPrimaryDown = transform.valid && (input::rawButton(static_cast<unsigned>(index), kTriggerButton) || input::rawButton(static_cast<unsigned>(index), kFaceButton));
 
@@ -1020,6 +1023,14 @@ namespace rpsui
                 handState.gameplayPressLatched = true;
             }
             handState.rawPrimaryPrevious = sample.rawPrimaryDown;
+            // A grip that began under the lease is a consumed back press. Back closes Config
+            // without a pointer press, so this also catches the panel vanishing under it.
+            if (!sample.rawGripDown) {
+                handState.backPressDrain = false;
+            } else if (handState.rawGripPrevious && handState.backGate.neutralObserved && !sample.rawBackAvailable) {
+                handState.backPressDrain = true;
+            }
+            handState.rawGripPrevious = sample.rawGripDown;
         }
 
         // Focused panels use the single visible pointer as their capture owner.
@@ -1093,15 +1104,15 @@ namespace rpsui
             if (wantsLease) {
                 if (handState_[index].focusedPanel) {
                     samples[index].leaseAccepted = input::captureHost(static_cast<unsigned>(index),
-                        snapshot.ready, samples[index].configNavigation);
+                        snapshot.ready, samples[index].configNavigation || handState_[index].backPressDrain);
                     if (samples[index].leaseAccepted) suppressedHands_ |= suppressionBit(hand);
                 } else {
                     samples[index].leaseAccepted = requestInputSuppressionLocked(snapshot, hand);
                 }
-            } else if (handState_[index].focusedPressDrain) {
-                // Prevent an already consumed click becoming a shot on pointer exit.
+            } else if (handState_[index].focusedPressDrain || handState_[index].backPressDrain) {
+                // Prevent an already consumed click becoming a shot on pointer exit or panel close.
                 // The locomotion/turn stick is released on this same input frame.
-                input::captureHost(static_cast<unsigned>(index), snapshot.ready, false, false);
+                input::captureHost(static_cast<unsigned>(index), snapshot.ready, handState_[index].backPressDrain, false);
                 suppressedHands_ |= suppressionBit(hand);
             } else {
                 clearInputSuppressionLocked(hand);
@@ -1150,8 +1161,8 @@ namespace rpsui
                 state.focusedPanel=0;
                 pointer_click_gate::reset(state.clickGate);
                 pointer_click_gate::reset(state.backGate);
-                if (state.focusedPressDrain) {
-                    input::captureHost(static_cast<unsigned>(index),snapshot.ready,false,false);
+                if (state.focusedPressDrain || state.backPressDrain) {
+                    input::captureHost(static_cast<unsigned>(index),snapshot.ready,state.backPressDrain,false);
                 } else clearInputSuppressionLocked(pointerHand(index));
             }
         };
@@ -1376,6 +1387,11 @@ namespace rpsui
             numberInputReady_=snapshot.ready;
             if (!snapshot.ready) {
                 clearPointerStateLocked();
+                // The game is not taking input, so there is no press left to keep from it.
+                for (auto& state : handState_) {
+                    state.focusedPressDrain = false;
+                    state.backPressDrain = false;
+                }
                 clearAllInputSuppressionLocked();
                 return;
             }

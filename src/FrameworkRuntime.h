@@ -222,6 +222,7 @@ namespace rpsui
             bool configNavigation{ false };
             bool rawBackAvailable{ false };
             bool rawBackDown{ false };
+            bool rawGripDown{ false };
             bool submittedBackDown{ false };
         };
 
@@ -230,9 +231,14 @@ namespace rpsui
             pointer_click_gate::State clickGate{};
             pointer_click_gate::State backGate{};
             bool rawPrimaryPrevious{ false };
+            bool rawGripPrevious{ false };
             bool gameplayPressLatched{ false };
             std::uint64_t focusedPanel{};
+            // Presses a panel consumed, still physically held: the hand stays captured until
+            // release so the rest of the press never reaches the game. ROCK reads any capture
+            // on a hand as the whole hand being the UI's, so this includes its trigger.
             bool focusedPressDrain{};
+            bool backPressDrain{};
         };
 
         struct ActiveResize
