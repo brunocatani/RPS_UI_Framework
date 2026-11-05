@@ -25,6 +25,17 @@ namespace rpsui::api::number_overlay
         HudBracketed = 2,
     };
 
+    // A cartridge beside the number, in every style, for a consumer that knows
+    // what a weapon's chamber holds.
+    enum class ChamberMarker : std::uint8_t
+    {
+        None = 0,
+        // Hollow and dim: no round in the chamber.
+        Empty = 1,
+        // Solid: a round in the chamber.
+        Chambered = 2,
+    };
+
     struct Registration
     {
         std::uint32_t size{ sizeof(Registration) };
@@ -46,7 +57,8 @@ namespace rpsui::api::number_overlay
         float color[3]{ 1.0f, 1.0f, 1.0f }; // Digit and frame color, 0..1 each.
         std::uint32_t secondaryValue{}; // Hud styles only: the number below the divider.
         Style style{ Style::Plain };
-        std::uint8_t reservedStyle[3]{};
+        ChamberMarker chamber{ ChamberMarker::None };
+        std::uint8_t reservedStyle[2]{};
     };
 
     struct Api
@@ -63,7 +75,8 @@ namespace rpsui::api::number_overlay
 
     static_assert(std::is_standard_layout_v<Registration> && sizeof(Registration) == 168);
     static_assert(std::is_standard_layout_v<Presentation> && sizeof(Presentation) == 104);
-    static_assert(offsetof(Presentation, value) == 72 && offsetof(Presentation, style) == 100);
+    static_assert(offsetof(Presentation, value) == 72 && offsetof(Presentation, style) == 100 &&
+        offsetof(Presentation, chamber) == 101);
     static_assert(std::is_standard_layout_v<Api> && sizeof(Api) == 24);
 }
 #pragma pack(pop)

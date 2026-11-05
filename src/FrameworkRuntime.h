@@ -30,6 +30,7 @@ namespace rpsui
         std::array<float, 3> color{ 1.0f, 1.0f, 1.0f };
         std::uint32_t secondaryValue{ 0 };
         rpsui::api::number_overlay::Style style{ rpsui::api::number_overlay::Style::Plain };
+        rpsui::api::number_overlay::ChamberMarker chamber{ rpsui::api::number_overlay::ChamberMarker::None };
     };
 
     struct RenderPanelSnapshot

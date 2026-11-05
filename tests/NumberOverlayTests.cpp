@@ -61,4 +61,44 @@ int main()
     assert(!hudLayout(1,2,false,atlas,0,480).glyphCount);
     assert(!hudLayout(1,2,false,{0.5f,0.5f,0.45f},1024,480).glyphCount);
 
+    // The chamber cartridge stays inside the panel and clear of the digits, at
+    // any count, in all three styles.
+    using rpsui::number_overlay::cartridgeLayout;
+    using rpsui::number_overlay::plainChamberLayout;
+    const auto inPanel=[](const rpsui::number_overlay::Rect& r) {
+        assert(r.left>=0 && r.right<=1024 && r.top>=0 && r.bottom<=480 && r.right>r.left && r.bottom>r.top);
+    };
+    for (const std::uint32_t value:{0u,7u,30u,240u}) {
+        const auto plain=plainChamberLayout(value,1024,480);
+        assert(plain.digits.count>0);
+        inPanel(plain.cartridge);
+        for (std::size_t i=0;i<plain.digits.count;++i) {
+            assert(plain.digits.glyphs[i].left>=0 && plain.digits.glyphs[i].right<=plain.cartridge.left);
+        }
+        for (const bool bracketed:{false,true}) {
+            const auto hud=hudLayout(value,value,bracketed,atlas,1024,480,true);
+            inPanel(hud.cartridge);
+            for (std::size_t i=0;i<hud.glyphCount;++i) assert(hud.glyphs[i].right<=hud.cartridge.left);
+            for (std::size_t i=0;i<hud.barCount;++i) {
+                const auto& b=hud.bars[i];
+                assert(b.left>=0 && b.right<=1024 && b.top>=0 && b.bottom<=480);
+                // The brackets surround it; the divider stops short of it.
+                if (i==0) assert(b.right<=hud.cartridge.left);
+            }
+            const auto without=hudLayout(value,value,bracketed,atlas,1024,480);
+            assert(without.cartridge.right==0);
+        }
+    }
+    for (const bool chambered:{false,true}) {
+        const rpsui::number_overlay::Rect rect{100,100,130,221};
+        const auto cartridge=cartridgeLayout(rect,chambered);
+        assert(cartridge.count>0 && cartridge.count<=cartridge.quads.size());
+        for (std::size_t i=0;i<cartridge.count;++i) {
+            for (const auto& c:cartridge.quads[i].corners) {
+                assert(c.x>=rect.left-2 && c.x<=rect.right+2 && c.y>=rect.top-2 && c.y<=rect.bottom+2);
+            }
+            assert(chambered || cartridge.quads[i].alpha==rpsui::number_overlay::kCartridgeEmptyAlpha);
+        }
+    }
+    assert(!cartridgeLayout({0,0,0,0},true).count);
 }

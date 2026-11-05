@@ -773,6 +773,19 @@ namespace rpsui::render
             return {rgb[0]*opacity,rgb[1]*opacity,rgb[2]*opacity,opacity};
         }
 
+        // Inside a batch over the HUD atlas, whose eleventh cell is solid.
+        void drawChamberCartridge(Resources& state,const RenderPanelSnapshot& panel,const number_overlay::Rect& rect,const DirectX::XMFLOAT4& color)
+        {
+            constexpr DirectX::XMFLOAT2 solid{number_overlay::kHudSolidU,0.5f};
+            const auto cartridge=number_overlay::cartridgeLayout(rect,panel.numberLook.chamber==api::number_overlay::ChamberMarker::Chambered);
+            for (std::size_t i=0;i<cartridge.count;++i) {
+                const auto& quad=cartridge.quads[i];
+                const DirectX::XMFLOAT4 tint{color.x*quad.alpha,color.y*quad.alpha,color.z*quad.alpha,color.w*quad.alpha};
+                const auto vertex=[&](const number_overlay::Corner& c) { return Vertex{{c.x,c.y,0},tint,solid}; };
+                state.batch->DrawQuad(vertex(quad.corners[0]),vertex(quad.corners[1]),vertex(quad.corners[2]),vertex(quad.corners[3]));
+            }
+        }
+
         bool renderHudNumberPanel(Resources& state,const RenderPanelSnapshot& panel)
         {
             const bool firstAttempt=!state.hudAtlasFailed;
@@ -780,9 +793,10 @@ namespace rpsui::render
                 if (firstAttempt) log::error("Numeric overlay HUD glyph atlas creation failed");
                 return false;
             }
+            const bool chamber=panel.numberLook.chamber!=api::number_overlay::ChamberMarker::None;
             const auto layout=number_overlay::hudLayout(panel.number,panel.numberLook.secondaryValue,
                 panel.numberLook.style==api::number_overlay::Style::HudBracketed,state.hudMetrics,
-                static_cast<float>(panel.pixelWidth),static_cast<float>(panel.pixelHeight));
+                static_cast<float>(panel.pixelWidth),static_cast<float>(panel.pixelHeight),chamber);
             beginNumberPass(state,panel,state.hudAtlas.Get());
             const auto color=numberColor(panel);
             state.batch->Begin();
@@ -797,6 +811,7 @@ namespace rpsui::render
                 state.batch->DrawQuad(Vertex{{b.left,b.top,0},color,solid},Vertex{{b.right,b.top,0},color,solid},
                     Vertex{{b.right,b.bottom,0},color,solid},Vertex{{b.left,b.bottom,0},color,solid});
             }
+            if (chamber) drawChamberCartridge(state,panel,layout.cartridge,color);
             state.batch->End(); state.effect->SetTexture(nullptr);
             return true;
         }
@@ -809,7 +824,11 @@ namespace rpsui::render
                 if (firstAttempt) log::error("Numeric overlay glyph atlas creation failed");
                 return false;
             }
-            const auto layout=number_overlay::layout(panel.number,static_cast<float>(panel.pixelWidth),static_cast<float>(panel.pixelHeight));
+            const auto pixelWidth=static_cast<float>(panel.pixelWidth), pixelHeight=static_cast<float>(panel.pixelHeight);
+            const bool chamber=panel.numberLook.chamber!=api::number_overlay::ChamberMarker::None;
+            const auto placed=chamber ? number_overlay::plainChamberLayout(panel.number,pixelWidth,pixelHeight) :
+                number_overlay::PlainChamberLayout{number_overlay::layout(panel.number,pixelWidth,pixelHeight),{}};
+            const auto& layout=placed.digits;
             beginNumberPass(state,panel,state.digitAtlas.Get());
             const auto color=numberColor(panel);
             state.batch->Begin();
@@ -819,6 +838,14 @@ namespace rpsui::render
                     Vertex{{g.right,g.bottom,0},color,{g.u1,1}},Vertex{{g.left,g.bottom,0},color,{g.u0,1}});
             }
             state.batch->End(); state.effect->SetTexture(nullptr);
+            // The digit atlas has no solid cell. The digits stand when the HUD
+            // atlas cannot be built: the marker is the optional part.
+            if (chamber && ensureHudAtlas(state)) {
+                beginNumberPass(state,panel,state.hudAtlas.Get());
+                state.batch->Begin();
+                drawChamberCartridge(state,panel,placed.cartridge,color);
+                state.batch->End(); state.effect->SetTexture(nullptr);
+            }
             return true;
         }
 

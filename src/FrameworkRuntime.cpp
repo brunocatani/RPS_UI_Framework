@@ -531,7 +531,10 @@ namespace rpsui
             }
             if (presentation.style!=api::number_overlay::Style::Plain && presentation.style!=api::number_overlay::Style::Hud &&
                 presentation.style!=api::number_overlay::Style::HudBracketed) return api::Result::InvalidArgument;
+            if (presentation.chamber!=api::number_overlay::ChamberMarker::None && presentation.chamber!=api::number_overlay::ChamberMarker::Empty &&
+                presentation.chamber!=api::number_overlay::ChamberMarker::Chambered) return api::Result::InvalidArgument;
             look.style=presentation.style;
+            look.chamber=presentation.chamber;
             look.secondaryValue=presentation.secondaryValue;
             std::scoped_lock lock(mutex_);
             auto* panel=findPanelLocked(handle);

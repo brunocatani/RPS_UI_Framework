@@ -30,6 +30,76 @@ namespace rpsui::number_overlay
     }
 
     /*
+     * The chamber cartridge: an upright round four times as tall as it is wide,
+     * a pointed body over a separate base. Solid when chambered; a thin dim
+     * outline when not. Drawn as quads sampling a solid cell, in panel pixels.
+     */
+    struct Rect { float left{},top{},right{},bottom{}; };
+    struct Corner { float x{},y{}; };
+    struct CartridgeQuad { std::array<Corner,4> corners{}; float alpha{1.0f}; };
+    struct CartridgeLayout { std::array<CartridgeQuad,15> quads{}; std::size_t count{}; };
+    inline constexpr float kCartridgeAspect=121.0f/30.0f;
+    inline constexpr float kCartridgeFillAlpha=180.0f/255.0f, kCartridgeEmptyAlpha=0.38f;
+
+    inline CartridgeLayout cartridgeLayout(const Rect& rect,bool chambered) noexcept
+    {
+        CartridgeLayout result;
+        const float width=rect.right-rect.left, height=rect.bottom-rect.top;
+        if (!std::isfinite(width) || !std::isfinite(height) || width<=0 || height<=0) return result;
+        const auto at=[&](float x,float y) { return Corner{rect.left+x*width,rect.top+y*height}; };
+        const auto add=[&](std::array<Corner,4> corners,float alpha) { result.quads[result.count++]={corners,alpha}; };
+        // The body's outline from the base up over the tip, in fractions of the rect.
+        constexpr std::array<std::array<float,2>,7> kBody{{{0.1f,0.909f},{0.1f,0.2975f},{0.2f,0.1405f},{0.5f,0.0f},
+            {0.8f,0.1405f},{0.9f,0.2975f},{0.9f,0.909f}}};
+        constexpr float kBaseTop=0.926f;
+        const float stroke=width*(2.2f/30.0f), half=stroke*0.5f;
+        const float outlineAlpha=chambered ? 1.0f : kCartridgeEmptyAlpha;
+        const auto edge=[&](Corner from,Corner to) {
+            const float dx=to.x-from.x, dy=to.y-from.y, length=std::sqrt(dx*dx+dy*dy);
+            if (length<=0) return;
+            const float nx=-dy/length*half, ny=dx/length*half;
+            add({Corner{from.x+nx,from.y+ny},Corner{to.x+nx,to.y+ny},Corner{to.x-nx,to.y-ny},Corner{from.x-nx,from.y-ny}},outlineAlpha);
+        };
+        if (chambered) {
+            add({at(0.1f,0.2975f),at(0.9f,0.2975f),at(0.9f,0.909f),at(0.1f,0.909f)},kCartridgeFillAlpha);
+            add({at(0.1f,0.2975f),at(0.2f,0.1405f),at(0.8f,0.1405f),at(0.9f,0.2975f)},kCartridgeFillAlpha);
+            add({at(0.2f,0.1405f),at(0.5f,0.0f),at(0.5f,0.0f),at(0.8f,0.1405f)},kCartridgeFillAlpha);
+            add({at(0.0f,kBaseTop),at(1.0f,kBaseTop),at(1.0f,1.0f),at(0.0f,1.0f)},outlineAlpha);
+        } else {
+            edge(at(0.0f,kBaseTop),at(1.0f,kBaseTop));
+            edge(at(1.0f,kBaseTop),at(1.0f,1.0f));
+            edge(at(1.0f,1.0f),at(0.0f,1.0f));
+            edge(at(0.0f,1.0f),at(0.0f,kBaseTop));
+        }
+        for (std::size_t i=0;i<kBody.size();++i) {
+            const auto& from=kBody[i];
+            const auto& to=kBody[(i+1)%kBody.size()];
+            edge(at(from[0],from[1]),at(to[0],to[1]));
+        }
+        return result;
+    }
+
+    // The plain style beside a cartridge: the digits right aligned to a fixed
+    // edge, so they keep their distance from it at any count.
+    inline constexpr float kPlainChamberDigitEdge=0.70f, kPlainChamberLeft=0.75f, kPlainChamberTop=0.22f, kPlainChamberHeight=0.505f;
+    struct PlainChamberLayout { Layout digits{}; Rect cartridge{}; };
+    inline PlainChamberLayout plainChamberLayout(std::uint32_t value,float width,float height) noexcept
+    {
+        PlainChamberLayout result;
+        result.digits=layout(value,width*kPlainChamberDigitEdge,height);
+        if (!result.digits.count) return result;
+        const float shift=width*kPlainChamberDigitEdge-result.digits.glyphs[result.digits.count-1].right;
+        for (std::size_t i=0;i<result.digits.count;++i) {
+            result.digits.glyphs[i].left+=shift;
+            result.digits.glyphs[i].right+=shift;
+        }
+        const float cartridgeHeight=height*kPlainChamberHeight;
+        const float left=width*kPlainChamberLeft, top=height*kPlainChamberTop;
+        result.cartridge={left,top,left+cartridgeHeight/kCartridgeAspect,top+cartridgeHeight};
+        return result;
+    }
+
+    /*
      * The Fallout HUD ammo counter (HUDMenu.swf, AmmoCount_mc): the loaded
      * count over a divider over the reserve count, both right aligned to the
      * divider's right end, in one condensed bold face. Proportions come from
@@ -59,13 +129,15 @@ namespace rpsui::number_overlay
         std::size_t glyphCount{};
         std::array<Bar,7> bars{};
         std::size_t barCount{};
+        Rect cartridge{}; // Set only with chamber; the height of the two rows.
     };
     inline constexpr float kHudDigitGap=0.30f, kHudDividerThickness=0.09f, kHudDividerLength=1.9f;
     inline constexpr float kHudBracketPadX=0.35f, kHudBracketPadY=0.28f, kHudBracketTick=0.32f;
     inline constexpr float kHudFill=0.92f;
+    inline constexpr float kHudChamberGap=0.35f;
 
     inline HudLayout hudLayout(std::uint32_t top,std::uint32_t bottom,bool bracketed,
-        const HudAtlasMetrics& atlas,float width,float height) noexcept
+        const HudAtlasMetrics& atlas,float width,float height,bool chamber=false) noexcept
     {
         HudLayout result;
         const float inkHeight=atlas.inkBottom-atlas.inkTop;
@@ -85,7 +157,9 @@ namespace rpsui::number_overlay
         const float blockHeight=2.0f+2.0f*kHudDigitGap;
         const float padX=bracketed ? kHudBracketPadX : 0.0f;
         const float padY=bracketed ? kHudBracketPadY+kHudDividerThickness : 0.0f;
-        const float contentWidth=blockWidth+2.0f*padX, contentHeight=blockHeight+2.0f*padY;
+        const float cartridgeWidth=chamber ? blockHeight/kCartridgeAspect : 0.0f;
+        const float chamberBlock=chamber ? kHudChamberGap+cartridgeWidth : 0.0f;
+        const float contentWidth=blockWidth+chamberBlock+2.0f*padX, contentHeight=blockHeight+2.0f*padY;
         const float h=(std::min)(height*kHudFill/contentHeight,width*kHudFill/contentWidth);
         const float originX=(width-contentWidth*h)*0.5f, originY=(height-contentHeight*h)*0.5f;
         const float right=originX+(padX+blockWidth)*h;
@@ -105,6 +179,10 @@ namespace rpsui::number_overlay
         const float dividerCenter=blockTop+(1.0f+kHudDigitGap)*h;
         result.bars[result.barCount++]={right-kHudDividerLength*h,dividerCenter-kHudDividerThickness*h*0.5f,
             right,dividerCenter+kHudDividerThickness*h*0.5f};
+        if (chamber) {
+            const float left=right+kHudChamberGap*h;
+            result.cartridge={left,blockTop,left+cartridgeWidth*h,blockTop+blockHeight*h};
+        }
         if (bracketed) {
             const float left=originX, outerRight=originX+contentWidth*h;
             const float upper=originY, lower=originY+contentHeight*h;

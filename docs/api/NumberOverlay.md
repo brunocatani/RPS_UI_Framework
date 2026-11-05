@@ -16,6 +16,9 @@ Numbers the host draws itself, with no consumer render callback and no borrowed 
 | `color` | Digit and frame color, 0 to 1 per channel |
 | `secondaryValue` | Hud styles only: the number below the divider |
 | `style` | `Style` value |
+| `chamber` | `ChamberMarker` value: a cartridge beside the number, in any style |
+
+`ChamberMarker` values: `None` draws nothing, `Empty` a hollow dim cartridge, `Chambered` a solid one. It takes the digit color and opacity; the digits move aside for it and keep their size where they fit.
 
 `Style` values:
 
