@@ -57,6 +57,35 @@ namespace rpsui::api::input
         float pitchDegrees[2]{}, yawDegrees[2]{};
     };
 
+    enum class KeyboardEventKind : std::uint8_t
+    {
+        // code is one printable UTF-16 code unit, already through the keyboard layout.
+        Character = 1,
+        // code is the Windows virtual-key code of a key press, including auto-repeat.
+        Key = 2,
+    };
+
+    struct KeyboardEvent
+    {
+        std::uint32_t code{};
+        KeyboardEventKind kind{};
+        std::uint8_t reservedBytes[3]{};
+    };
+
+    inline constexpr std::uint32_t kKeyboardEventCapacity = 32;
+
+    struct KeyboardRead
+    {
+        std::uint32_t size{ sizeof(KeyboardRead) };
+        std::uint32_t version{ kRecordVersion };
+        // Oldest first; anything past the capacity arrives in the next read.
+        KeyboardEvent events[kKeyboardEventCapacity]{};
+        std::uint32_t count{};
+        // The game window has foreground focus. Windows sends it no keys otherwise.
+        std::uint8_t focused{};
+        std::uint8_t reservedBytes[3]{};
+    };
+
     struct Api
     {
         static constexpr InterfaceId interfaceId = kInterfaceId;
@@ -77,12 +106,22 @@ namespace rpsui::api::input
         // Game thread only. Sets shared UI aim; the settings host (PALM) owns
         // persistence. Changes apply on the next input frame to every UI panel.
         bool(RPSUI_CALL* setPointerAim)(const PointerAim* aim) noexcept {};
+        // Game callback thread only. Takes the physical keyboard for text entry and
+        // reads what was typed. While held the game sees no key presses, so typing
+        // cannot move the player or open a menu; key releases still reach it, so no
+        // key sticks. Renew every callback; it lapses after three callbacks, when
+        // input stops being ready, on a game load and on unsubscribe. False means not
+        // held: another subscriber owns it, input is not ready or capture is
+        // unavailable. One owner at a time; a new owner starts with no old keys.
+        bool(RPSUI_CALL* captureKeyboard)(std::uint64_t token, KeyboardRead* read) noexcept {};
     };
 
     static_assert(std::is_standard_layout_v<HandInput> && sizeof(HandInput) == 48);
     static_assert(std::is_standard_layout_v<Frame> && sizeof(Frame) == 128);
     static_assert(std::is_standard_layout_v<Capture> && sizeof(Capture) == 40);
     static_assert(std::is_standard_layout_v<PointerAim> && sizeof(PointerAim) == 24);
-    static_assert(std::is_standard_layout_v<Api> && sizeof(Api) == 48);
+    static_assert(std::is_standard_layout_v<KeyboardEvent> && sizeof(KeyboardEvent) == 8);
+    static_assert(std::is_standard_layout_v<KeyboardRead> && sizeof(KeyboardRead) == 272);
+    static_assert(std::is_standard_layout_v<Api> && sizeof(Api) == 56);
 }
 #pragma pack(pop)

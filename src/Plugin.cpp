@@ -2,6 +2,7 @@
 
 #include "FrameworkRuntime.h"
 #include "InputService.h"
+#include "KeyboardCapture.h"
 #include "Logger.h"
 #include "RequiredUpdates.h"
 #include "render/RenderHooks.h"
@@ -132,6 +133,8 @@ namespace
                 "RPS UI Framework host unavailable: input initialization failed");
             return;
         }
+        // Optional service: panels and controller input work without it.
+        (void)rpsui::keyboard::install();
         rpsui::log::info(
             "RPS UI Framework host is ready for UI consumers");
     }

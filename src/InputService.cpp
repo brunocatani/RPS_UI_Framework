@@ -4,6 +4,7 @@
 #include "NativeWandPose.h"
 #include "FrameworkRuntime.h"
 #include "PanelCooperation.h"
+#include "KeyboardCapture.h"
 #include "Logger.h"
 #include "vrcf/VRControllersManager.h"
 #include <bit>
@@ -32,6 +33,7 @@ struct State {
  std::vector<Client> callbacks; // Reused exclusively by the existing game tick.
  api::input::Frame frame;
  std::array<std::array<float,3>,2> aim{{{0,1,0},{0,1,0}}};
+ std::uint64_t keyboardOwner{},keyboardRenewed{}; // Protected by mutex.
  std::atomic_bool installed{},session{},allowPollCapture{};
  std::atomic_uint32_t devices[2]{vr::k_unTrackedDeviceIndexInvalid,vr::k_unTrackedDeviceIndexInvalid};
  std::atomic_uint64_t raw[2]{};
@@ -129,6 +131,9 @@ void publishMask(unsigned slot,const api::input::Capture& capture) {
   s.activeMasks[slot/64].fetch_or(bit,std::memory_order_release);
  else s.activeMasks[slot/64].fetch_and(~bit,std::memory_order_release);
 }
+void releaseKeyboardLocked(State& s) noexcept {
+ if(s.keyboardOwner){s.keyboardOwner=0;keyboard::setCaptured(false);}
+}
 void update() {
  auto& s=state();++s.frame.sequence;s.frame.seconds=std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
  s.frame.ready=false;s.frame.hands[0]={};s.frame.hands[1]={};
@@ -164,10 +169,11 @@ void update() {
  {std::scoped_lock lock(s.mutex);for(const auto i:s.liveClients)s.callbacks.push_back(s.clients[i]);}
  for(const auto& client:s.callbacks){PanelCallbackScope scope(client.gate);if(scope)client.callback(&s.frame,client.context);}
  s.callbacks.clear();
- {std::scoped_lock lock(s.mutex);for(const auto i:s.liveClients)if(!s.frame.ready || s.frame.sequence-s.clients[i].renewed>3)publishMask(i+1,{});}
+ {std::scoped_lock lock(s.mutex);for(const auto i:s.liveClients)if(!s.frame.ready || s.frame.sequence-s.clients[i].renewed>3)publishMask(i+1,{});
+  if(!s.frame.ready || s.frame.sequence-s.keyboardRenewed>3)releaseKeyboardLocked(s);}
 }
 void safeUpdate() noexcept {
- try{update();}catch(...){auto& s=state();s.callbacks.clear();s.allowPollCapture=false;s.frame.ready=false;for(unsigned i=0;i<=maxClients;++i)publishMask(i,{});static bool logged=false;if(!logged){logged=true;log::error("UI input frame failed; capture released");}}
+ try{update();}catch(...){auto& s=state();s.callbacks.clear();s.allowPollCapture=false;s.frame.ready=false;for(unsigned i=0;i<=maxClients;++i)publishMask(i,{});{std::scoped_lock lock(s.mutex);releaseKeyboardLocked(s);}static bool logged=false;if(!logged){logged=true;log::error("UI input frame failed; capture released");}}
 }
 void tick(std::uint64_t argument) {
  originalTick(argument);
@@ -180,7 +186,7 @@ std::uint64_t RPSUI_CALL subscribe(api::input::Callback callback,void* context) 
 }
 bool RPSUI_CALL unsubscribe(std::uint64_t token) noexcept {
  auto& s=state();std::scoped_lock lock(s.mutex);
- for(unsigned i=0;i<maxClients;++i)if(s.clients[i].token==token && token){s.clients[i].closing=true;publishMask(i+1,{});if(!s.clients[i].gate->close())return false;s.clients[i]={};std::erase(s.liveClients,i);return true;}return false;
+ for(unsigned i=0;i<maxClients;++i)if(s.clients[i].token==token && token){s.clients[i].closing=true;publishMask(i+1,{});if(s.keyboardOwner==token)releaseKeyboardLocked(s);if(!s.clients[i].gate->close())return false;s.clients[i]={};std::erase(s.liveClients,i);return true;}return false;
 }
 bool RPSUI_CALL setPointerAim(const api::input::PointerAim* value) noexcept {
  if(!value || value->size!=sizeof(*value) || value->version!=api::kRecordVersion)return false;
@@ -200,6 +206,19 @@ bool RPSUI_CALL capture(std::uint64_t token,const api::input::Capture* request) 
  for(unsigned hand=0;hand<2;++hand)if((request->buttons[hand]|request->chord[hand])&~allowed)return false;
  auto& s=state();std::scoped_lock lock(s.mutex);
  for(unsigned i=0;i<maxClients;++i)if(s.clients[i].token==token && token){if(s.clients[i].closing)return false;s.clients[i].renewed=s.frame.sequence;publishMask(i+1,*request);return true;}return false;
+}
+bool RPSUI_CALL captureKeyboard(std::uint64_t token,api::input::KeyboardRead* read) noexcept {
+ if(!read || read->size!=sizeof(*read) || read->version!=api::kRecordVersion)return false;
+ read->count=0;read->focused=0;
+ auto& s=state();std::scoped_lock lock(s.mutex);
+ if(!token || !s.frame.ready || !keyboard::available())return false;
+ const auto client=std::find_if(s.clients.begin(),s.clients.end(),[token](const Client& value){return value.token==token;});
+ if(client==s.clients.end() || client->closing || (s.keyboardOwner && s.keyboardOwner!=token))return false;
+ if(!s.keyboardOwner){s.keyboardOwner=token;keyboard::setCaptured(true);}
+ s.keyboardRenewed=s.frame.sequence;
+ read->count=keyboard::drain(read->events);
+ read->focused=keyboard::focused()?1:0;
+ return true;
 }
 }
 bool start() noexcept {
@@ -221,7 +240,10 @@ bool start() noexcept {
  }catch(...){log::error("Independent UI input installation failed");return false;}
 }
 bool installed() noexcept{return state().installed.load();}
-void sessionReady(bool ready) noexcept{state().session=ready;if(!ready)state().allowPollCapture=false;}
+void sessionReady(bool ready) noexcept{
+ auto& s=state();s.session=ready;if(ready)return;
+ s.allowPollCapture=false;std::scoped_lock lock(s.mutex);releaseKeyboardLocked(s);
+}
 bool rawButton(unsigned hand,unsigned button) noexcept{return hand<2 && button<64 && (state().frame.hands[hand].pressed&(1ull<<button));}
 void publishHostCapture() noexcept {
  auto& s=state();api::input::Capture request;
@@ -238,6 +260,6 @@ bool captureHost(unsigned hand,bool active,bool configNavigation,bool captureSti
  if(!s.hostFrame)publishHostCapture();return true;
 }
 const api::input::Api& table() noexcept {
- static const api::input::Api api{.subscribe=&subscribe,.unsubscribe=&unsubscribe,.capture=&capture,.rawInputReadActive=&rawInputReadActive,.capturedButtons=&capturedButtons,.setPointerAim=&setPointerAim};return api;
+ static const api::input::Api api{.subscribe=&subscribe,.unsubscribe=&unsubscribe,.capture=&capture,.rawInputReadActive=&rawInputReadActive,.capturedButtons=&capturedButtons,.setPointerAim=&setPointerAim,.captureKeyboard=&captureKeyboard};return api;
 }
 }

@@ -1,5 +1,6 @@
 #include "ContextualScrollPolicy.h"
 #include "InputCapturePolicy.h"
+#include "KeyboardCapturePolicy.h"
 #include "NativeWandPose.h"
 #include "PanelResizePolicy.h"
 #include "PointerClickGate.h"
@@ -82,6 +83,22 @@ namespace
         using namespace rpsui::api;
         static_assert(offsetof(input::Api, capturedButtons) == 32);
         static_assert(offsetof(input::Api, setPointerAim) == 40);
+        static_assert(offsetof(input::Api, captureKeyboard) == 48);
+        static_assert(offsetof(input::KeyboardRead, count) == 264 && offsetof(input::KeyboardRead, focused) == 268);
+        // A swallowed release would leave the key held in the game's key table.
+        require(rpsui::keyboard_policy::swallowsRawKey(0) && !rpsui::keyboard_policy::swallowsRawKey(rpsui::keyboard_policy::kRawKeyBreak),
+            "raw key press and release handling inverted");
+        require(rpsui::keyboard_policy::swallowsRawKey(2) && !rpsui::keyboard_policy::swallowsRawKey(rpsui::keyboard_policy::kRawKeyBreak | 2),
+            "extended key flag changed raw key handling");
+        rpsui::keyboard_policy::EventQueue queue;
+        std::uint32_t pushed = 0;
+        while (queue.push(input::KeyboardEventKind::Character, pushed)) ++pushed;
+        require(pushed == 256, "keyboard queue capacity changed");
+        std::array<input::KeyboardEvent, 8> events{};
+        require(queue.drain(events) == events.size() && events[0].code == 0 && events[7].code == 7, "keyboard queue lost order");
+        require(queue.push(input::KeyboardEventKind::Key, 999), "drained keyboard queue did not reopen");
+        queue.clear();
+        require(queue.drain(events) == 0, "cleared keyboard queue kept keys for the next owner");
         static_assert(offsetof(framework::PanelRenderFrame, backDown) == 106);
         static_assert(offsetof(framework::PanelRegistration, flags) == 192);
         static_assert(offsetof(framework::PanelRegistration, renderCallback) == 200);

@@ -199,6 +199,10 @@ int main() try
     require(inputApi->capture(subscriptions.back(), &chord), "chord publication failed");
     require(!inputApi->capturedButtons(0, 1ull << 2, 0) &&
         inputApi->capturedButtons(0, 1ull << 2, 1ull << 7) == (1ull << 2), "high-slot chord changed semantics");
+    input::KeyboardRead keyboardRead;
+    require(!inputApi->captureKeyboard(subscriptions[0], nullptr), "null keyboard read accepted");
+    require(!inputApi->captureKeyboard(subscriptions[0], &keyboardRead) && !inputState.keyboardOwner,
+        "keyboard captured while input was not ready or the service was absent");
     rpsui::input::update(); // Session is false: no native game access.
     require(inputCallbacks == subscriptions.size(), "input dispatch truncated");
     require(inputOrder == inputIds, "input callback order changed");
