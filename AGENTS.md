@@ -31,4 +31,5 @@ Menus, settings pages and their persistence belong to the mods that show them. R
 - Released contracts never change. Retired export names, interface IDs, slot meanings, enum values and flag bits are never reused.
 - Every version refusal and retired-export call is logged with the calling DLL and stops the game at the main menu with an error box (`src/RequiredUpdates.cpp`).
 - Native controller input works without ROCK or a skeleton provider.
+- Keyboard capture (`src/KeyboardCapture.cpp`) changes no engine state: it withholds raw key presses and `WM_CHAR` from the game window while held. Key releases always pass, or a key would stay held in the game's key table.
 - Screen-positioned drawing does not exist. World drawing is anchored to world points, and text is projected per eye.
