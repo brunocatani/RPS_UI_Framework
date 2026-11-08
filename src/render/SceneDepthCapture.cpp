@@ -7,6 +7,8 @@
 #include "render/SceneDepthSelector.h"
 #include "render/GraphicsStateCommit.h"
 
+#include <RPS/Runtime/HookChain.h>
+
 #include <array>
 
 namespace rpsui::render::SceneDepthCapture
@@ -18,10 +20,7 @@ namespace rpsui::render::SceneDepthCapture
         constexpr std::uintptr_t kCaptureCallsiteRva =
             0x1D8E84A;
 
-        constexpr std::array<std::uint8_t, 5>
-            kOriginalCall{
-                0xE8, 0x81, 0xCD, 0x00, 0x00
-            };
+        // The call (+4..+8) is checked by resolving it; the bytes around it as they are.
         constexpr std::array<std::uint8_t, 13>
             kCallsiteBoundary{
                 0x33, 0xD2, 0x33, 0xC9,
@@ -70,6 +69,9 @@ namespace rpsui::render::SceneDepthCapture
         std::atomic<const char*> g_nativeFailureStage{ "none" };
         std::uintptr_t g_callsite = 0;
         CommitGraphicsState g_original = nullptr;
+        // The call site's bytes before RPS UI patched it: the native call or
+        // another plugin's, restored on rollback.
+        std::array<std::uint8_t, 5> g_before{};
         using SceneSelector = std::uint8_t (*)(void*);
         SceneSelector g_sceneSelector = nullptr;
         bool g_trueScopesSelector = false;
@@ -351,8 +353,8 @@ namespace rpsui::render::SceneDepthCapture
             try {
                 REL::safe_write(
                     g_callsite,
-                    kOriginalCall.data(),
-                    kOriginalCall.size());
+                    g_before.data(),
+                    g_before.size());
             } catch (...) {
                 log::critical(
                     "RPS UI Framework could not roll back a failed scene-depth hook transaction");
@@ -572,11 +574,20 @@ namespace rpsui::render::SceneDepthCapture
                 log::info("RPS UI graphics state commit compatibility: preserving E9 detour at RVA=0x{:X} -> 0x{:X}; native tail verified",
                     kCommitGraphicsStateRva, commitEntry.detour);
             }
-            const bool callsiteMatches = g_callsite >= 4 && MatchesReadable(
-                    "depth capture callsite",
-                    reinterpret_cast<const void*>(
-                        g_callsite - 4),
-                    kCallsiteBoundary);
+            // The bytes around the call, and the call itself: the native commit or
+            // another plugin's detour, which the hook then calls through.
+            const std::array<std::uint8_t, 4> before{ kCallsiteBoundary[0], kCallsiteBoundary[1], kCallsiteBoundary[2],
+                kCallsiteBoundary[3] };
+            const std::array<std::uint8_t, 4> after{ kCallsiteBoundary[9], kCallsiteBoundary[10], kCallsiteBoundary[11],
+                kCallsiteBoundary[12] };
+            const auto call = RPS::Runtime::HookChain::resolveCall(g_callsite, target.address());
+            const bool callsiteMatches = g_callsite >= 4 && call &&
+                MatchesReadable("depth capture callsite", reinterpret_cast<const void*>(g_callsite - 4), before) &&
+                MatchesReadable("depth capture callsite", reinterpret_cast<const void*>(g_callsite + 5), after);
+            if (call.foreign()) {
+                log::info("RPS UI scene-depth capture: the commit call is already hooked by {}; RPS UI calls through it",
+                    call.owner);
+            }
             if (!targetMatches || !callsiteMatches) {
                 log::error(
                     "RPS UI Framework scene-depth callsite failed its FO4VR 1.2.72 byte guard");
@@ -584,14 +595,15 @@ namespace rpsui::render::SceneDepthCapture
                 return false;
             }
 
+            std::memcpy(g_before.data(), reinterpret_cast<const void*>(g_callsite), g_before.size());
             g_original = reinterpret_cast<
-                CommitGraphicsState>(target.address());
+                CommitGraphicsState>(call.callee);
             const auto original =
                 F4SE::GetTrampoline().write_call<5>(
                     g_callsite,
                     HookCommit);
             patched = true;
-            if (original != target.address()) {
+            if (original != call.callee) {
                 RestoreOriginalCall();
                 patched = false;
                 g_callsite = 0;

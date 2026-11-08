@@ -56,14 +56,8 @@ if ($renderer -match 'imgui|ImGui') {
     throw 'The framework host must not own a consumer ImGui context.'
 }
 
-foreach ($token in @(
-    'stereo guards do not match the pristine',
-    'exclusive guarded FO4VR stereo composition',
-    'roll back a failed stereo-hook transaction'
-)) {
-    if (-not $hooks.Contains($token)) {
-        throw "Exclusive host hook guard missing: $token"
-    }
+if (-not $hooks.Contains('roll back a failed stereo-hook transaction')) {
+    throw 'The stereo hook no longer rolls back a failed installation.'
 }
 
 if (-not $cmake.Contains('D:/FO4/mods/RPS_UI_Framework') -and

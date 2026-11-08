@@ -7,6 +7,9 @@
 #include "render/RenderHooks.h"
 #include "render/SceneDepthCapture.h"
 
+#include <RPS/Runtime/HookChain.h>
+#include <intrin.h>
+
 namespace rpsui::render::RenderHooks
 {
     namespace
@@ -15,7 +18,11 @@ namespace rpsui::render::RenderHooks
 
         std::mutex g_installMutex;
         std::atomic_bool g_installed = false;
-        SubmitStereoTexture g_originalSubmit = nullptr;
+        // What each submit call reached: the native submit or another renderer's
+        // detour. The shared hook picks its call site's by its return address.
+        SubmitStereoTexture g_fullCallee = nullptr;
+        SubmitStereoTexture g_specialCallee = nullptr;
+        std::uintptr_t g_fullReturn = 0;
 
         [[nodiscard]] bool IsExactRuntime() noexcept
         {
@@ -56,22 +63,6 @@ namespace rpsui::render::RenderHooks
                    std::memcmp(address, expected.data(), expected.size()) == 0;
         }
 
-        [[nodiscard]] bool CallTargets(
-            std::uintptr_t callsite,
-            std::uintptr_t target) noexcept
-        {
-            if (!IsReadable(reinterpret_cast<const void*>(callsite), 5)) {
-                return false;
-            }
-            const auto* instruction = reinterpret_cast<const std::uint8_t*>(callsite);
-            if (instruction[0] != 0xE8) {
-                return false;
-            }
-            std::int32_t displacement = 0;
-            std::memcpy(&displacement, instruction + 1, sizeof(displacement));
-            return EngineStereoSubmissionPolicy::RelativeCallTarget(callsite, displacement) == target;
-        }
-
         void RestoreCall(
             std::uintptr_t callsite,
             const std::array<std::uint8_t, 5>& bytes) noexcept
@@ -108,8 +99,10 @@ namespace rpsui::render::RenderHooks
                 }
             }
 
-            if (g_originalSubmit) {
-                g_originalSubmit(texture);
+            const auto through = reinterpret_cast<std::uintptr_t>(_ReturnAddress()) == g_fullReturn ? g_fullCallee :
+                                                                                                   g_specialCallee;
+            if (through) {
+                through(texture);
             }
         }
     }
@@ -130,6 +123,9 @@ namespace rpsui::render::RenderHooks
         std::uintptr_t specialCallsite = 0;
         bool fullPatched = false;
         bool specialPatched = false;
+        // Each call site's bytes before RPS UI patched it, for rollback.
+        std::array<std::uint8_t, 5> fullBefore = kFullSubmitOriginalCall;
+        std::array<std::uint8_t, 5> specialBefore = kSpecialSubmitOriginalCall;
         try {
             const REL::Relocation<std::uintptr_t> fullCall{ REL::Offset(kFullSubmitCallsiteRva) };
             const REL::Relocation<std::uintptr_t> specialCall{ REL::Offset(kSpecialSubmitCallsiteRva) };
@@ -138,54 +134,66 @@ namespace rpsui::render::RenderHooks
             specialCallsite = specialCall.address();
             const auto submitAddress = submit.address();
 
+            // Another renderer that already hooked a submit call keeps it: RPS UI
+            // composes first and calls through its detour.
+            const auto full = RPS::Runtime::HookChain::resolveCall(fullCallsite, submitAddress);
+            const auto special = RPS::Runtime::HookChain::resolveCall(specialCallsite, submitAddress);
             const bool guarded =
                 fullCallsite >= kCallsitePrefixSize &&
                 specialCallsite >= kCallsitePrefixSize &&
                 Matches(reinterpret_cast<const void*>(fullCallsite - kCallsitePrefixSize), kFullSubmitBoundary) &&
                 Matches(reinterpret_cast<const void*>(specialCallsite - kCallsitePrefixSize), kSpecialSubmitBoundary) &&
-                Matches(reinterpret_cast<const void*>(submitAddress), kSubmitStereoTexturePrologue) &&
-                CallTargets(fullCallsite, submitAddress) &&
-                CallTargets(specialCallsite, submitAddress);
+                RPS::Runtime::HookChain::resolveEntry(submitAddress, kSubmitStereoTexturePrologue) &&
+                full && special;
             if (!guarded) {
                 log::critical(
-                    "RPS UI Framework stereo guards do not match the pristine FO4VR 1.2.72 callsites; "
-                    "another renderer may already own them");
+                    "RPS UI Framework stereo guards do not match FO4VR 1.2.72 and no other renderer's detour is "
+                    "recognisable there");
                 return InstallResult::Conflict;
             }
+            std::memcpy(fullBefore.data(), reinterpret_cast<const void*>(fullCallsite), fullBefore.size());
+            std::memcpy(specialBefore.data(), reinterpret_cast<const void*>(specialCallsite), specialBefore.size());
 
-            g_originalSubmit = reinterpret_cast<SubmitStereoTexture>(submitAddress);
+            g_fullCallee = reinterpret_cast<SubmitStereoTexture>(full.callee);
+            g_specialCallee = reinterpret_cast<SubmitStereoTexture>(special.callee);
+            g_fullReturn = fullCallsite + 5;
             auto& trampoline = F4SE::GetTrampoline();
             const auto fullOriginal = trampoline.write_call<5>(fullCallsite, HookSubmitStereoTexture);
             fullPatched = true;
-            if (fullOriginal != submitAddress) {
-                RestoreCall(fullCallsite, kFullSubmitOriginalCall);
+            if (fullOriginal != full.callee) {
+                RestoreCall(fullCallsite, fullBefore);
                 fullPatched = false;
-                g_originalSubmit = nullptr;
+                g_fullCallee = g_specialCallee = nullptr;
                 return InstallResult::Unavailable;
             }
 
             const auto specialOriginal = trampoline.write_call<5>(specialCallsite, HookSubmitStereoTexture);
             specialPatched = true;
-            if (specialOriginal != submitAddress) {
-                RestoreCall(specialCallsite, kSpecialSubmitOriginalCall);
+            if (specialOriginal != special.callee) {
+                RestoreCall(specialCallsite, specialBefore);
                 specialPatched = false;
-                RestoreCall(fullCallsite, kFullSubmitOriginalCall);
+                RestoreCall(fullCallsite, fullBefore);
                 fullPatched = false;
-                g_originalSubmit = nullptr;
+                g_fullCallee = g_specialCallee = nullptr;
                 return InstallResult::Unavailable;
             }
 
             g_installed.store(true, std::memory_order_release);
-            log::info("RPS UI Framework installed exclusive guarded FO4VR stereo composition");
+            if (full.foreign() || special.foreign()) {
+                log::info("RPS UI Framework installed guarded FO4VR stereo composition chained behind {}",
+                    full.foreign() ? full.owner : special.owner);
+            } else {
+                log::info("RPS UI Framework installed guarded FO4VR stereo composition");
+            }
             return InstallResult::Installed;
         } catch (...) {
             if (specialPatched) {
-                RestoreCall(specialCallsite, kSpecialSubmitOriginalCall);
+                RestoreCall(specialCallsite, specialBefore);
             }
             if (fullPatched) {
-                RestoreCall(fullCallsite, kFullSubmitOriginalCall);
+                RestoreCall(fullCallsite, fullBefore);
             }
-            g_originalSubmit = nullptr;
+            g_fullCallee = g_specialCallee = nullptr;
             log::critical("RPS UI Framework stereo-hook installation failed");
             return InstallResult::Unavailable;
         }
