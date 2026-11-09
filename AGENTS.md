@@ -12,7 +12,7 @@ Shared world-space UI and VR controller interaction for Fallout 4 VR. It hosts w
 
 ## Build and tests
 
-Requires Windows x64, Visual Studio 2022, CMake, vcpkg with `VCPKG_ROOT` set, and checkouts of CommonLibF4VR, F4VR-CommonFramework, RPS Framework and Dear ImGui at the revision `docs/api/Framework.md` names. Point `RPS_FRAMEWORK_INCLUDE_DIR` at RPS Framework's `include/` and `IMGUI_DIR` at the Dear ImGui checkout when they are not where `CMakeLists.txt` looks by default.
+Requires Windows x64, Visual Studio 2022, CMake, vcpkg with `VCPKG_ROOT` set, and checkouts of CommonLibF4VR, F4VR-CommonFramework and Dear ImGui at the revision `docs/api/Framework.md` names, and RPS Framework's staged package (built from RPS Framework). Point `RPSFramework_DIR` at the package's CMake directory and `IMGUI_DIR` at the Dear ImGui checkout when they are not where `CMakeLists.txt` looks by default.
 
 - Build with `cmake --preset custom-fast`, then `cmake --build build-fast --config Release`.
 - Build tests with `cmake --build build-fast --config Release --target build_tests`, then run `ctest --test-dir build-fast -C Release --output-on-failure`.

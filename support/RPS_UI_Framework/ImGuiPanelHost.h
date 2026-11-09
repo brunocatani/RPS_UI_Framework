@@ -33,16 +33,17 @@ namespace rpsui::imgui_host
     // Scroll axes arrive in stick deflection; ImGui wants wheel units.
     inline constexpr float kWheelUnitsPerSecond = 5.5f;
 
-    // One frame's host-side input for a panel, in render-target pixels.
+    // One frame's host-side input for a panel. The pointer is in layout
+    // units; the pixel size is the render target's.
     struct PanelInput
     {
         std::uint32_t pixelWidth{ 0 };
         std::uint32_t pixelHeight{ 0 };
-        float layoutWidth{ 0.0f };  // Zero: the pixel size.
+        float layoutWidth{ 0.0f };
         float layoutHeight{ 0.0f };
         float deltaSeconds{ 1.0f / 90.0f };
-        float pointerPixelX{ 0.0f };
-        float pointerPixelY{ 0.0f };
+        float pointerX{ 0.0f };
+        float pointerY{ 0.0f };
         float scrollAxisX{ 0.0f };
         float scrollAxisY{ 0.0f };
         bool pointerValid{ false };
@@ -118,13 +119,12 @@ namespace rpsui::imgui_host
         FedInput fed{};
         const auto pixelWidth = static_cast<float>(input.pixelWidth);
         const auto pixelHeight = static_cast<float>(input.pixelHeight);
-        const bool layout = input.layoutWidth > 0.0f && input.layoutHeight > 0.0f;
-        fed.layoutWidth = layout ? input.layoutWidth : pixelWidth;
-        fed.layoutHeight = layout ? input.layoutHeight : pixelHeight;
-        fed.pointerValid = input.feedPointer && input.pointerValid && std::isfinite(input.pointerPixelX) &&
-            std::isfinite(input.pointerPixelY);
-        fed.pointerX = fed.pointerValid ? input.pointerPixelX * fed.layoutWidth / pixelWidth : 0.0f;
-        fed.pointerY = fed.pointerValid ? input.pointerPixelY * fed.layoutHeight / pixelHeight : 0.0f;
+        fed.layoutWidth = input.layoutWidth > 0.0f ? input.layoutWidth : pixelWidth;
+        fed.layoutHeight = input.layoutHeight > 0.0f ? input.layoutHeight : pixelHeight;
+        fed.pointerValid = input.feedPointer && input.pointerValid && std::isfinite(input.pointerX) &&
+            std::isfinite(input.pointerY);
+        fed.pointerX = fed.pointerValid ? input.pointerX : 0.0f;
+        fed.pointerY = fed.pointerValid ? input.pointerY : 0.0f;
         const bool deltaValid = std::isfinite(input.deltaSeconds) && input.deltaSeconds >= 0.0f;
         fed.deltaSeconds = std::clamp(deltaValid ? input.deltaSeconds : 1.0f / 90.0f, 1.0f / 240.0f, 0.1f);
 
@@ -208,17 +208,20 @@ namespace rpsui::imgui_host
         LocalPanelHost(const LocalPanelHost&) = delete;
         LocalPanelHost& operator=(const LocalPanelHost&) = delete;
 
-        // One frame into target, which the caller cleared.
+        // One frame into target, which the caller cleared. input.pixelWidth and
+        // pixelHeight are the target's size, the layout size when left zero.
         void frame(ID3D11RenderTargetView* target, PanelInput input,
             api::framework::PhysicalHand pointerHand = api::framework::PhysicalHand::Right, bool backDown = false)
         {
             ImGui::SetCurrentContext(imgui_);
-            input.pixelWidth = panel_.pixelWidth;
-            input.pixelHeight = panel_.pixelHeight;
+            if (!input.pixelWidth || !input.pixelHeight) {
+                input.pixelWidth = static_cast<std::uint32_t>(std::ceil(panel_.layoutWidth));
+                input.pixelHeight = static_cast<std::uint32_t>(std::ceil(panel_.layoutHeight));
+            }
             input.layoutWidth = panel_.layoutWidth;
             input.layoutHeight = panel_.layoutHeight;
             const auto fed = feedFrame(input);
-            beginFrame(context_, target, panel_.pixelWidth, panel_.pixelHeight);
+            beginFrame(context_, target, input.pixelWidth, input.pixelHeight);
             api::framework::PanelDrawFrame frame{};
             frame.panelHandle = 1;
             frame.frameSequence = ++sequence_;
@@ -227,8 +230,8 @@ namespace rpsui::imgui_host
             frame.d3dDevice = device_;
             frame.imgui = currentBinding();
             frame.defaultFont = defaultFont_;
-            frame.pixelWidth = panel_.pixelWidth;
-            frame.pixelHeight = panel_.pixelHeight;
+            frame.pixelWidth = input.pixelWidth;
+            frame.pixelHeight = input.pixelHeight;
             frame.layoutWidth = fed.layoutWidth;
             frame.layoutHeight = fed.layoutHeight;
             frame.deltaSeconds = fed.deltaSeconds;

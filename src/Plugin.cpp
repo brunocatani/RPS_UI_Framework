@@ -5,6 +5,7 @@
 #include "KeyboardCapture.h"
 #include "Logger.h"
 #include "RequiredUpdates.h"
+#include "UiSettings.h"
 #include "render/PanelImGui.h"
 #include "render/RenderHooks.h"
 #include "render/SceneDepthCapture.h"
@@ -110,8 +111,9 @@ namespace
         // when the host itself cannot start.
         rpsui::required_updates::watch();
 
-        // Read once here: panel contexts are built on the render thread, which
+        // Read here: panel contexts are built on the render thread, which
         // never does file I/O.
+        rpsui::settings::start();
         rpsui::render::panel_imgui::prepareFonts();
         auto& runtime = rpsui::FrameworkRuntime::get();
         if (!rpsui::render::SceneDepthCapture::Install()) {

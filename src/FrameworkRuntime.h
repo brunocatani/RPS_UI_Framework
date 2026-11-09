@@ -40,10 +40,9 @@ namespace rpsui
         rpsui::api::framework::PanelDrawCallback drawCallback{ nullptr };
         void* userData{ nullptr };
         std::shared_ptr<PanelCallbackGate> callbackGate;
-        std::uint32_t pixelWidth{ 0 };
-        std::uint32_t pixelHeight{ 0 };
         float layoutWidth{ 0.0f };
         float layoutHeight{ 0.0f };
+        float defaultPhysicalWidth{ 0.0f };
         std::int32_t sortOrder{ 0 };
         std::uint32_t flags{ 0 };
         bool numberOverlay{};
@@ -60,8 +59,9 @@ namespace rpsui
         rpsui::api::framework::ResizeHandle activeResizeHandle{
             rpsui::api::framework::ResizeHandle::None
         };
-        float pointerPixelX{ 0.0f };
-        float pointerPixelY{ 0.0f };
+        // Layout units.
+        float pointerX{ 0.0f };
+        float pointerY{ 0.0f };
         float scrollAxisX{ 0.0f };
         float scrollAxisY{ 0.0f };
         bool pointerValid{ false };
@@ -173,8 +173,9 @@ namespace rpsui
             rpsui::api::framework::ResizeHandle active{
                 rpsui::api::framework::ResizeHandle::None
             };
-            float pixelX{ 0.0f };
-            float pixelY{ 0.0f };
+            // Layout units.
+            float x{ 0.0f };
+            float y{ 0.0f };
             float scrollX{ 0.0f };
             float scrollY{ 0.0f };
             bool valid{ false };
@@ -188,8 +189,6 @@ namespace rpsui
             std::uint64_t panelHandle{ 0 };
             std::string panelId;
             std::string displayName;
-            std::uint32_t pixelWidth{ 0 };
-            std::uint32_t pixelHeight{ 0 };
             float defaultPhysicalWidth{ 0.0f };
             float minimumPhysicalWidth{ 0.0f };
             float maximumPhysicalWidth{ 0.0f };

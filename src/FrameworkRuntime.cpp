@@ -20,6 +20,8 @@ namespace rpsui
         constexpr std::uint32_t kFaceButton =
             static_cast<std::uint32_t>(f4cf::vrcf::k_EButton_A);
         constexpr float kPointerMaximumDistance = 500.0f;
+        // A sanity bound on a layout, far beyond any panel's drawing size.
+        constexpr float kMaximumLayoutExtent = 16384.0f;
 
         [[nodiscard]] constexpr std::size_t handIndex(pointer_hand_selection::Hand hand) noexcept
         {
@@ -173,10 +175,9 @@ namespace rpsui
                 .drawCallback = panel.drawCallback,
                 .userData = panel.userData,
                 .callbackGate = panel.callbackGate,
-                .pixelWidth = panel.pixelWidth,
-                .pixelHeight = panel.pixelHeight,
                 .layoutWidth = panel.layoutWidth,
                 .layoutHeight = panel.layoutHeight,
+                .defaultPhysicalWidth = panel.defaultPhysicalWidth,
                 .sortOrder = panel.sortOrder,
                 .flags = panel.flags,
                 .numberOverlay = panel.numberOverlay,
@@ -187,8 +188,8 @@ namespace rpsui
                 .pointerHand = panel.input.hand,
                 .hoveredResizeHandle = panel.input.hovered,
                 .activeResizeHandle = panel.input.active,
-                .pointerPixelX = panel.input.pixelX,
-                .pointerPixelY = panel.input.pixelY,
+                .pointerX = panel.input.x,
+                .pointerY = panel.input.y,
                 .scrollAxisX = panel.input.scrollX,
                 .scrollAxisY = panel.input.scrollY,
                 .pointerValid = panel.input.valid,
@@ -381,11 +382,11 @@ namespace rpsui
             const auto displayName = boundedString(
                 registration.displayName,
                 sizeof(registration.displayName));
-            const bool dimensionsValid =
-                registration.pixelWidth >= 640 &&
-                registration.pixelWidth <= 4096 &&
-                registration.pixelHeight >= 480 &&
-                registration.pixelHeight <= 4096;
+            // Any positive layout: the renderer sizes the texture from it.
+            const bool layoutValid =
+                std::isfinite(registration.layoutWidth) && std::isfinite(registration.layoutHeight) &&
+                registration.layoutWidth > 0.0f && registration.layoutHeight > 0.0f &&
+                registration.layoutWidth <= kMaximumLayoutExtent && registration.layoutHeight <= kMaximumLayoutExtent;
             const bool widthsValid =
                 std::isfinite(registration.defaultPhysicalWidth) &&
                 std::isfinite(registration.minimumPhysicalWidth) &&
@@ -397,15 +398,8 @@ namespace rpsui
                     registration.minimumPhysicalWidth &&
                 registration.defaultPhysicalWidth <=
                     registration.maximumPhysicalWidth;
-            // Both layout extents zero (pixel units) or both set. Each axis
-            // scales on its own, so a layout may stretch onto any texture.
-            const bool pixelLayout = registration.layoutWidth == 0.0f && registration.layoutHeight == 0.0f;
-            const bool layoutValid = pixelLayout ||
-                (std::isfinite(registration.layoutWidth) && std::isfinite(registration.layoutHeight) &&
-                    registration.layoutWidth >= 64.0f && registration.layoutHeight >= 64.0f);
             if (panelId.empty() ||
                 displayName.empty() ||
-                !dimensionsValid ||
                 !widthsValid ||
                 !layoutValid ||
                 registration.reserved != 0 ||
@@ -451,16 +445,12 @@ namespace rpsui
             }
 
             const std::uint64_t handle = nextPanelHandle_++;
-            const float aspect =
-                static_cast<float>(registration.pixelWidth) /
-                static_cast<float>(registration.pixelHeight);
+            const float aspect = registration.layoutWidth / registration.layoutHeight;
             PanelRecord panel{
                 .ownerToken = ownerToken,
                 .panelHandle = handle,
                 .panelId = panelId,
                 .displayName = displayName,
-                .pixelWidth = registration.pixelWidth,
-                .pixelHeight = registration.pixelHeight,
                 .defaultPhysicalWidth = registration.defaultPhysicalWidth,
                 .minimumPhysicalWidth = registration.minimumPhysicalWidth,
                 .maximumPhysicalWidth = registration.maximumPhysicalWidth,
@@ -536,7 +526,7 @@ namespace rpsui
         api::framework::PanelRegistration panel;
         std::memcpy(panel.panelId,registration.overlayId,sizeof(panel.panelId));
         std::memcpy(panel.displayName,registration.displayName,sizeof(panel.displayName));
-        panel.pixelWidth=1024; panel.pixelHeight=480;
+        panel.layoutWidth=1024; panel.layoutHeight=480;
         panel.defaultPhysicalWidth=3.0f; panel.minimumPhysicalWidth=0.1f; panel.maximumPhysicalWidth=100.0f;
         panel.flags=static_cast<std::uint32_t>(api::framework::PanelFlag::Transparent) | static_cast<std::uint32_t>(api::framework::PanelFlag::FixedSize);
         return registerPanelImpl(owner,panel,handle,false,nullptr,true);
@@ -745,6 +735,7 @@ namespace rpsui
             pose.physicalWidth < panel.minimumPhysicalWidth ||
             pose.physicalWidth > panel.maximumPhysicalWidth ||
             pose.physicalHeight <= 0.0f ||
+            pose.physicalHeight > kMaximumWorldMagnitude ||
             std::ranges::any_of(
                 pose.center,
                 [](float component) {
@@ -753,9 +744,6 @@ namespace rpsui
                 })) {
             return false;
         }
-        const float aspect =
-            static_cast<float>(panel.pixelWidth) /
-            static_cast<float>(panel.pixelHeight);
         return lengthSquared3(pose.right) > 0.99f &&
                lengthSquared3(pose.right) < 1.01f &&
                lengthSquared3(pose.up) > 0.99f &&
@@ -765,10 +753,7 @@ namespace rpsui
                std::fabs(dot3(pose.right, pose.up)) < 0.01f &&
                std::fabs(dot3(pose.right, pose.front)) < 0.01f &&
                std::fabs(dot3(pose.up, pose.front)) < 0.01f &&
-               handedness3(pose.right, pose.up, pose.front) > 0.99f &&
-               std::fabs(
-                   pose.physicalWidth / pose.physicalHeight - aspect) <
-                   0.001f;
+               handedness3(pose.right, pose.up, pose.front) > 0.99f;
     }
 
     void FrameworkRuntime::separateNewPanelLocked(PanelRecord& panel) noexcept
@@ -892,9 +877,7 @@ namespace rpsui
                 return rpsui::api::Result::OwnershipMismatch;
             }
             if (panel->closing) return api::Result::PanelClosing;
-            const float aspect =
-                static_cast<float>(panel->pixelWidth) /
-                static_cast<float>(panel->pixelHeight);
+            const float aspect = panel->layoutWidth / panel->layoutHeight;
             panel->pose.physicalWidth = panel->defaultPhysicalWidth;
             panel->pose.physicalHeight =
                 panel->defaultPhysicalWidth / aspect;
@@ -1222,9 +1205,8 @@ namespace rpsui
             }
 
             const panel_resize::Constraints constraints{
-                .aspectRatio =
-                    static_cast<float>(panel->pixelWidth) /
-                    static_cast<float>(panel->pixelHeight),
+                // The panel keeps the shape it has.
+                .aspectRatio = panel->pose.physicalWidth / panel->pose.physicalHeight,
                 .minimumWidth = panel->minimumPhysicalWidth,
                 .maximumWidth = panel->maximumPhysicalWidth,
             };
@@ -1253,10 +1235,10 @@ namespace rpsui
 
             panel->input.hand = sdkHand(resizeHand);
             panel->input.valid = true;
-            panel->input.pixelX =
-                hit.u * static_cast<float>(panel->pixelWidth);
-            panel->input.pixelY =
-                hit.v * static_cast<float>(panel->pixelHeight);
+            panel->input.x =
+                hit.u * panel->layoutWidth;
+            panel->input.y =
+                hit.v * panel->layoutHeight;
             panel->input.active = sdkResizeHandle(
                 activeResize_.active ?
                     activeResize_.drag.handle :
@@ -1323,8 +1305,8 @@ namespace rpsui
             panel_resize::hitTest(
                 hit.u,
                 hit.v,
-                static_cast<float>(panel->pixelWidth),
-                static_cast<float>(panel->pixelHeight)) :
+                panel->layoutWidth,
+                panel->layoutHeight) :
             panel_resize::Handle::None;
         const bool sameHand =
             pointerSelection_.active == decision.hand;
@@ -1335,9 +1317,8 @@ namespace rpsui
         if (risingPrimary &&
             resizeHandle != panel_resize::Handle::None) {
             const panel_resize::Constraints constraints{
-                .aspectRatio =
-                    static_cast<float>(panel->pixelWidth) /
-                    static_cast<float>(panel->pixelHeight),
+                // The panel keeps the shape it has.
+                .aspectRatio = panel->pose.physicalWidth / panel->pose.physicalHeight,
                 .minimumWidth = panel->minimumPhysicalWidth,
                 .maximumWidth = panel->maximumPhysicalWidth,
             };
@@ -1356,10 +1337,10 @@ namespace rpsui
                 selectedCandidate);
             panel->input.hand = sdkHand(decision.hand);
             panel->input.valid = true;
-            panel->input.pixelX =
-                hit.u * static_cast<float>(panel->pixelWidth);
-            panel->input.pixelY =
-                hit.v * static_cast<float>(panel->pixelHeight);
+            panel->input.x =
+                hit.u * panel->layoutWidth;
+            panel->input.y =
+                hit.v * panel->layoutHeight;
             panel->input.hovered = sdkResizeHandle(resizeHandle);
             panel->input.active = sdkResizeHandle(resizeHandle);
             return;
@@ -1375,10 +1356,10 @@ namespace rpsui
 
         panel->input.hand = sdkHand(decision.hand);
         panel->input.valid = hit.inside || controlsPanel;
-        panel->input.pixelX =
-            hit.u * static_cast<float>(panel->pixelWidth);
-        panel->input.pixelY =
-            hit.v * static_cast<float>(panel->pixelHeight);
+        panel->input.x =
+            hit.u * panel->layoutWidth;
+        panel->input.y =
+            hit.v * panel->layoutHeight;
         panel->input.primaryDown =
             controlsPanel && selectedCandidate.primaryDown;
         panel->input.hovered = sdkResizeHandle(resizeHandle);

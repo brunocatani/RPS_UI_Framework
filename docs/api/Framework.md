@@ -15,11 +15,10 @@ Registers consumers and world panels, submits panel poses and reads panel state.
 | Field | Meaning |
 | --- | --- |
 | `panelId`, `displayName` | Stable identity and label |
-| `pixelWidth`, `pixelHeight` | Render target size |
+| `layoutWidth`, `layoutHeight` | Your drawing size in ImGui units (`DisplaySize`) and the panel's default shape. Any positive size |
 | `defaultPhysicalWidth`, `minimumPhysicalWidth`, `maximumPhysicalWidth` | World size in game units |
 | `sortOrder` | Composition order |
 | `flags` | `PanelFlag` bits; zero is a rectangular opaque panel |
-| `layoutWidth`, `layoutHeight` | ImGui's display size. Both zero uses the pixel size; otherwise set both, at least 64. Each axis is scaled to the texture on its own |
 | `imgui` | Your Dear ImGui build, `RPSUI_IMGUI_BUILD()` |
 | `setupCallback` | Optional. Called once per ImGui context before its first frame |
 | `drawCallback`, `userData` | Called every frame the panel is open; keep both alive until the panel is unregistered |
@@ -35,7 +34,11 @@ Registers consumers and world panels, submits panel poses and reads panel state.
 
 ## Presenting
 
-`submitPanelPresentation` sends a `PanelPresentation` with a rising `sequence`, a `PanelPose` in game units and the `open` state. `getPanelState` returns the current pose, pointer hand and resize state. `resetPanelSize` returns the panel to its default width.
+`submitPanelPresentation` sends a `PanelPresentation` with a rising `sequence`, a `PanelPose` in game units and the `open` state. The pose's width must be within the registered limits; its height may be anything positive. The layout is scaled onto the panel on each axis, so a height off the layout's shape stretches the drawing. `getPanelState` returns the current pose, pointer hand and resize state. `resetPanelSize` returns the panel to its default width.
+
+## Resolution
+
+You never choose a texture size. The host gives each panel `Sharpness` texture pixels per layout unit at its default width (`RPS_UI.toml`, 1.5 unless the player changes it) and scales that with the panel's size in the world, so text stays equally sharp when a player enlarges a panel. Each texture has a full mip chain and is sampled anisotropically, so a small or distant panel is filtered rather than shimmering. `PanelDrawFrame::pixelWidth` and `pixelHeight` report the texture's size this frame. Dear ImGui rasterizes fonts at the texture's density on its own.
 
 ## Drawing
 

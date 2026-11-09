@@ -5,11 +5,13 @@
 #include "render/D3D11StateGuard.h"
 #include "render/HostRenderer.h"
 #include "render/PanelImGui.h"
+#include "render/PanelTextureSize.h"
 #include "render/SceneDepthCapture.h"
 #include "render/StereoProjection.h"
 #include "render/WorldDrawRenderer.h"
 #include "render/WorldPanelDepth.h"
 #include "NumberOverlayLayout.h"
+#include "UiSettings.h"
 #include "WorldDrawStore.h"
 
 #include <DirectXTK/CommonStates.h>
@@ -266,23 +268,37 @@ namespace rpsui::render
             return true;
         }
 
+        // Number overlays draw at their layout size: their digits are large
+        // shapes on a few centimetres of world. Every other panel follows
+        // its size in the world at the player's sharpness.
+        [[nodiscard]] panel_texture::Extent panelExtent(const RenderPanelSnapshot& panel, float sharpness) noexcept
+        {
+            if (panel.numberOverlay)
+                return { static_cast<std::uint32_t>(panel.layoutWidth), static_cast<std::uint32_t>(panel.layoutHeight) };
+            return panel_texture::size(panel.layoutWidth, panel.layoutHeight, panel.pose.physicalWidth,
+                panel.pose.physicalHeight, panel.defaultPhysicalWidth, sharpness);
+        }
+
         [[nodiscard]] PanelGpu* ensurePanelGpu(
             Resources& state,
-            const RenderPanelSnapshot& panel) noexcept
+            const RenderPanelSnapshot& panel,
+            panel_texture::Extent extent) noexcept
         {
             auto& gpu = state.panelGpu[panel.panelHandle];
             if (gpu.texture &&
-                gpu.width == panel.pixelWidth &&
-                gpu.height == panel.pixelHeight) {
+                gpu.width == extent.width &&
+                gpu.height == extent.height) {
                 gpu.lastSeenFrame = state.frameSequence;
                 return std::addressof(gpu);
             }
 
             gpu = {};
+            // The whole mip chain, regenerated after each draw: the world pass
+            // samples it trilinearly and anisotropically.
             D3D11_TEXTURE2D_DESC description{};
-            description.Width = panel.pixelWidth;
-            description.Height = panel.pixelHeight;
-            description.MipLevels = 1;
+            description.Width = extent.width;
+            description.Height = extent.height;
+            description.MipLevels = panel_texture::mipLevels(extent);
             description.ArraySize = 1;
             description.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
             description.SampleDesc.Count = 1;
@@ -290,6 +306,7 @@ namespace rpsui::render
             description.BindFlags =
                 D3D11_BIND_RENDER_TARGET |
                 D3D11_BIND_SHADER_RESOURCE;
+            description.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
             if (FAILED(state.device->CreateTexture2D(
                     &description,
                     nullptr,
@@ -305,8 +322,8 @@ namespace rpsui::render
                 state.panelGpu.erase(panel.panelHandle);
                 return nullptr;
             }
-            gpu.width = panel.pixelWidth;
-            gpu.height = panel.pixelHeight;
+            gpu.width = extent.width;
+            gpu.height = extent.height;
             gpu.lastSeenFrame = state.frameSequence;
             return std::addressof(gpu);
         }
@@ -449,7 +466,8 @@ namespace rpsui::render
                 nullptr,
                 0xFFFFFFFFu);
             state.context->RSSetState(state.commonStates->CullNone());
-            auto* sampler = state.commonStates->LinearClamp();
+            // Panels are often seen at an angle and from afar.
+            auto* sampler = state.commonStates->AnisotropicClamp();
             state.context->PSSetSamplers(0, 1, &sampler);
 
             auto* output = state.submittedRenderTarget.Get();
@@ -763,8 +781,7 @@ namespace rpsui::render
             state.context->RSSetState(state.commonStates->CullNone());
             auto* sampler=state.commonStates->LinearClamp(); state.context->PSSetSamplers(0,1,&sampler);
             state.effect->SetWorld(DirectX::XMMatrixIdentity()); state.effect->SetView(DirectX::XMMatrixIdentity());
-            state.effect->SetProjection(DirectX::XMMatrixOrthographicOffCenterRH(0,static_cast<float>(panel.pixelWidth),
-                static_cast<float>(panel.pixelHeight),0,0,1));
+            state.effect->SetProjection(DirectX::XMMatrixOrthographicOffCenterRH(0,panel.layoutWidth,panel.layoutHeight,0,0,1));
             state.effect->SetTexture(atlas); state.effect->Apply(state.context.Get());
         }
 
@@ -799,7 +816,7 @@ namespace rpsui::render
             const bool chamber=panel.numberLook.chamber!=api::number_overlay::ChamberMarker::None;
             const auto layout=number_overlay::hudLayout(panel.number,panel.numberLook.secondaryValue,
                 panel.numberLook.style==api::number_overlay::Style::HudBracketed,state.hudMetrics,
-                static_cast<float>(panel.pixelWidth),static_cast<float>(panel.pixelHeight),chamber);
+                panel.layoutWidth,panel.layoutHeight,chamber);
             beginNumberPass(state,panel,state.hudAtlas.Get());
             const auto color=numberColor(panel);
             state.batch->Begin();
@@ -827,7 +844,7 @@ namespace rpsui::render
                 if (firstAttempt) log::error("Numeric overlay glyph atlas creation failed");
                 return false;
             }
-            const auto pixelWidth=static_cast<float>(panel.pixelWidth), pixelHeight=static_cast<float>(panel.pixelHeight);
+            const auto pixelWidth=panel.layoutWidth, pixelHeight=panel.layoutHeight;
             const bool chamber=panel.numberLook.chamber!=api::number_overlay::ChamberMarker::None;
             const auto placed=chamber ? number_overlay::plainChamberLayout(panel.number,pixelWidth,pixelHeight) :
                 number_overlay::PlainChamberLayout{number_overlay::layout(panel.number,pixelWidth,pixelHeight),{}};
@@ -866,8 +883,8 @@ namespace rpsui::render
                 &renderTarget,
                 nullptr);
             D3D11_VIEWPORT viewport{};
-            viewport.Width = static_cast<float>(panel.pixelWidth);
-            viewport.Height = static_cast<float>(panel.pixelHeight);
+            viewport.Width = static_cast<float>(gpu.width);
+            viewport.Height = static_cast<float>(gpu.height);
             viewport.MinDepth = 0.0f;
             viewport.MaxDepth = 1.0f;
             state.context->RSSetViewports(1, &viewport);
@@ -884,7 +901,7 @@ namespace rpsui::render
 
             if (panel.numberOverlay) return renderNumberPanel(state, panel);
             return panel_imgui::drawPanel(state.device.Get(), state.context.Get(), state.deviceGeneration,
-                state.frameSequence, panel, renderTarget, deltaSeconds);
+                state.frameSequence, panel, renderTarget, gpu.width, gpu.height, deltaSeconds);
         }
     }
 
@@ -960,11 +977,12 @@ namespace rpsui::render
                 0.1f);
             state.lastFrame = now;
             ++state.frameSequence;
+            const float sharpness = settings::current()->sharpness;
 
             for (const auto& panel : panels) {
                 PanelCallbackScope callbackScope(panel.callbackGate);
                 if (!callbackScope) continue;
-                auto* gpu = ensurePanelGpu(state, panel);
+                auto* gpu = ensurePanelGpu(state, panel, panelExtent(panel, sharpness));
                 if (!gpu) {
                     if (traceSample) reportPanelProjection(panel, projection, depth.frameEpoch, false);
                     continue;
@@ -977,6 +995,8 @@ namespace rpsui::render
                     if (traceSample) reportPanelProjection(panel, projection, depth.frameEpoch, false);
                     continue;
                 }
+                // The panel's render target is unbound once its drawing scope ended.
+                state.context->GenerateMips(gpu->shaderResource.Get());
                 const bool drawn = drawWorldPanel(
                     state,
                     panel,

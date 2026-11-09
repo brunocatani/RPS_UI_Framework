@@ -150,7 +150,7 @@ namespace rpsui::render::panel_imgui
 
     bool drawPanel(ID3D11Device* device, ID3D11DeviceContext* context, std::uint64_t deviceGeneration,
         std::uint64_t frameSequence, const RenderPanelSnapshot& snapshot, ID3D11RenderTargetView* target,
-        float deltaSeconds) noexcept
+        std::uint32_t pixelWidth, std::uint32_t pixelHeight, float deltaSeconds) noexcept
     {
         if (!device || !context || !target || !snapshot.drawCallback) return false;
         auto* panel = ensureContext(device, context, deviceGeneration, snapshot);
@@ -159,19 +159,19 @@ namespace rpsui::render::panel_imgui
         ImGui::SetCurrentContext(panel->context.get());
         try {
             imgui_host::PanelInput input{};
-            input.pixelWidth = snapshot.pixelWidth;
-            input.pixelHeight = snapshot.pixelHeight;
+            input.pixelWidth = pixelWidth;
+            input.pixelHeight = pixelHeight;
             input.layoutWidth = snapshot.layoutWidth;
             input.layoutHeight = snapshot.layoutHeight;
             input.deltaSeconds = deltaSeconds;
-            input.pointerPixelX = snapshot.pointerPixelX;
-            input.pointerPixelY = snapshot.pointerPixelY;
+            input.pointerX = snapshot.pointerX;
+            input.pointerY = snapshot.pointerY;
             input.scrollAxisX = snapshot.scrollAxisX;
             input.scrollAxisY = snapshot.scrollAxisY;
             input.pointerValid = snapshot.pointerValid;
             input.primaryDown = snapshot.primaryDown;
             const auto fed = imgui_host::feedFrame(input);
-            imgui_host::beginFrame(context, target, snapshot.pixelWidth, snapshot.pixelHeight);
+            imgui_host::beginFrame(context, target, pixelWidth, pixelHeight);
 
             api::framework::PanelDrawFrame frame{};
             frame.panelHandle = snapshot.panelHandle;
@@ -181,8 +181,8 @@ namespace rpsui::render::panel_imgui
             frame.d3dDevice = device;
             frame.imgui = imgui_host::currentBinding();
             frame.defaultFont = panel->defaultFont;
-            frame.pixelWidth = snapshot.pixelWidth;
-            frame.pixelHeight = snapshot.pixelHeight;
+            frame.pixelWidth = pixelWidth;
+            frame.pixelHeight = pixelHeight;
             frame.layoutWidth = fed.layoutWidth;
             frame.layoutHeight = fed.layoutHeight;
             frame.deltaSeconds = fed.deltaSeconds;

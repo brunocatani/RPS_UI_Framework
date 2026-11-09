@@ -37,7 +37,7 @@ namespace rpsui::render::panel_imgui
     // not be drawn; the reason is logged once per panel.
     [[nodiscard]] bool drawPanel(ID3D11Device* device, ID3D11DeviceContext* context, std::uint64_t deviceGeneration,
         std::uint64_t frameSequence, const RenderPanelSnapshot& panel, ID3D11RenderTargetView* target,
-        float deltaSeconds) noexcept;
+        std::uint32_t pixelWidth, std::uint32_t pixelHeight, float deltaSeconds) noexcept;
 
     // Any thread: the panel was unregistered.
     void retire(std::uint64_t panelHandle) noexcept;

@@ -51,24 +51,25 @@ namespace rpsui::panel_resize
                handle == Handle::BottomLeft || handle == Handle::BottomRight;
     }
 
+    // Edge and corner bands in layout units.
     [[nodiscard]] inline Handle hitTest(
         float u,
         float v,
-        float pixelWidth,
-        float pixelHeight,
-        float edgePixels = 22.0f,
-        float cornerPixels = 72.0f) noexcept
+        float layoutWidth,
+        float layoutHeight,
+        float edgeBand = 22.0f,
+        float cornerBand = 72.0f) noexcept
     {
         if (!std::isfinite(u) || !std::isfinite(v) ||
-            !std::isfinite(pixelWidth) || !std::isfinite(pixelHeight) ||
-            pixelWidth <= 0.0f || pixelHeight <= 0.0f ||
+            !std::isfinite(layoutWidth) || !std::isfinite(layoutHeight) ||
+            layoutWidth <= 0.0f || layoutHeight <= 0.0f ||
             u < 0.0f || u > 1.0f || v < 0.0f || v > 1.0f) {
             return Handle::None;
         }
-        const float edgeU = std::clamp(edgePixels / pixelWidth, 0.0f, 0.25f);
-        const float edgeV = std::clamp(edgePixels / pixelHeight, 0.0f, 0.25f);
-        const float cornerU = std::clamp(cornerPixels / pixelWidth, edgeU, 0.35f);
-        const float cornerV = std::clamp(cornerPixels / pixelHeight, edgeV, 0.35f);
+        const float edgeU = std::clamp(edgeBand / layoutWidth, 0.0f, 0.25f);
+        const float edgeV = std::clamp(edgeBand / layoutHeight, 0.0f, 0.25f);
+        const float cornerU = std::clamp(cornerBand / layoutWidth, edgeU, 0.35f);
+        const float cornerV = std::clamp(cornerBand / layoutHeight, edgeV, 0.35f);
         const bool left = u <= edgeU;
         const bool right = u >= 1.0f - edgeU;
         const bool top = v <= edgeV;

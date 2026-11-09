@@ -73,6 +73,8 @@ namespace rpsui::api::framework
         float right[3]{ 1.0f, 0.0f, 0.0f };
         float up[3]{ 0.0f, 0.0f, 1.0f };
         float front[3]{ 0.0f, -1.0f, 0.0f };
+        // Game units. Any positive height: the layout is scaled onto the
+        // panel on each axis, so a height off the layout's shape stretches it.
         float physicalWidth{ 112.5f };
         float physicalHeight{ 70.3125f };
     };
@@ -137,8 +139,9 @@ namespace rpsui::api::framework
 
     /*
      * One frame, between the host's NewFrame and Render. Coordinates are in
-     * layout units (the registration's layout size, or pixels when it has
-     * none), the same units as ImGui's DisplaySize and MousePos. The host has
+     * layout units (the registration's layout size), the same units as
+     * ImGui's DisplaySize and MousePos. pixelWidth and pixelHeight are the
+     * texture's size this frame, which follows the panel's size in the world. The host has
      * already fed the pointer position, the primary button and the scroll axes
      * to ImGui and turned the software cursor on while the pointer is valid; a
      * consumer may change io.MouseDrawCursor during the frame.
@@ -183,17 +186,17 @@ namespace rpsui::api::framework
         std::uint32_t version{ kRecordVersion };
         char panelId[64]{};
         char displayName[96]{};
-        std::uint32_t pixelWidth{ 1440 };
-        std::uint32_t pixelHeight{ 900 };
+        // The panel's drawing size in ImGui units (DisplaySize), and its
+        // default shape. The host picks the texture's resolution from the
+        // panel's size in the world and the player's sharpness setting, so
+        // the layout stays the same however large the panel is shown.
+        float layoutWidth{ 1440.0f };
+        float layoutHeight{ 900.0f };
         float defaultPhysicalWidth{ 112.5f };
         float minimumPhysicalWidth{ 72.0f };
         float maximumPhysicalWidth{ 180.0f };
         std::int32_t sortOrder{ 0 };
         std::uint32_t flags{ 0 }; // PanelFlag bits. Zero is a rectangular opaque panel.
-        // ImGui's DisplaySize. Both zero: the pixel size. Otherwise both at
-        // least 64; the host scales each axis to the render target on its own.
-        float layoutWidth{ 0.0f };
-        float layoutHeight{ 0.0f };
         std::uint32_t reserved{ 0 };
         ImGuiBuild imgui{};
         PanelSetupCallback setupCallback{ nullptr }; // Optional.
@@ -251,7 +254,7 @@ namespace rpsui::api::framework
     static_assert(std::is_standard_layout_v<ImGuiBinding> && sizeof(ImGuiBinding) == 32);
     static_assert(std::is_standard_layout_v<PanelSetup> && sizeof(PanelSetup) == 80);
     static_assert(std::is_standard_layout_v<PanelDrawFrame> && sizeof(PanelDrawFrame) == 152);
-    static_assert(std::is_standard_layout_v<PanelRegistration> && sizeof(PanelRegistration) == 288);
+    static_assert(std::is_standard_layout_v<PanelRegistration> && sizeof(PanelRegistration) == 280);
     static_assert(std::is_standard_layout_v<PanelPresentation> && sizeof(PanelPresentation) == 80);
     static_assert(std::is_standard_layout_v<PanelState> && sizeof(PanelState) == 88);
     static_assert(std::is_standard_layout_v<Api> && sizeof(Api) == 64);

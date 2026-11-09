@@ -101,8 +101,8 @@ namespace
         require(queue.drain(events) == 0, "cleared keyboard queue kept keys for the next owner");
         static_assert(offsetof(framework::PanelDrawFrame, backDown) == 146);
         static_assert(offsetof(framework::PanelRegistration, flags) == 192);
-        static_assert(offsetof(framework::PanelRegistration, imgui) == 208);
-        static_assert(offsetof(framework::PanelRegistration, drawCallback) == 272);
+        static_assert(offsetof(framework::PanelRegistration, imgui) == 200);
+        static_assert(offsetof(framework::PanelRegistration, drawCallback) == 264);
         const auto circle = static_cast<std::uint32_t>(framework::PanelFlag::CircularInput);
         require(framework::panelContains(0, 0.01f, 0.01f), "existing rectangle lost its corner");
         require(!framework::panelContains(circle, 0.01f, 0.01f), "circular panel captured a transparent corner");

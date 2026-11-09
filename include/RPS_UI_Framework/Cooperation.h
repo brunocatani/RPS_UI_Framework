@@ -111,7 +111,7 @@ namespace rpsui::api::cooperation
         Result(RPSUI_CALL* unregisterConsumerSafely)(std::uint64_t ownerToken) noexcept {};
     };
 
-    static_assert(std::is_standard_layout_v<PanelRegistration> && sizeof(PanelRegistration) == 312);
+    static_assert(std::is_standard_layout_v<PanelRegistration> && sizeof(PanelRegistration) == 304);
     static_assert(std::is_standard_layout_v<PanelAgreement> && sizeof(PanelAgreement) == 96);
     static_assert(std::is_standard_layout_v<ConsumerDirectoryEntry> && sizeof(ConsumerDirectoryEntry) == 168);
     static_assert(std::is_standard_layout_v<PanelDirectoryEntry> && sizeof(PanelDirectoryEntry) == 272);
