@@ -83,7 +83,7 @@ add_library(rpsui_imgui STATIC
   "${IMGUI_DIR}/imgui_widgets.cpp"
   "${IMGUI_DIR}/backends/imgui_impl_dx11.cpp"
   "${IMGUI_DIR}/misc/freetype/imgui_freetype.cpp")
-target_include_directories(rpsui_imgui PUBLIC "${IMGUI_DIR}" "${IMGUI_DIR}/backends" "${PUBLIC_INCLUDE_DIR}")
+target_include_directories(rpsui_imgui PUBLIC "${IMGUI_DIR}" "${IMGUI_DIR}/backends" "${PUBLIC_INCLUDE_DIR}" "${ROOT_DIR}/support")
 target_compile_features(rpsui_imgui PUBLIC cxx_std_23)
 target_compile_definitions(rpsui_imgui PUBLIC
   NOMINMAX WIN32_LEAN_AND_MEAN IMGUI_USER_CONFIG="RPS_UI_Framework/ImGuiBuild.h" IMGUI_ENABLE_FREETYPE)

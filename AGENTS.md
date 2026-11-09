@@ -5,6 +5,7 @@ Shared world-space UI and VR controller interaction for Fallout 4 VR. It hosts w
 ## Layout
 
 - `include/RPS_UI_Framework/`: the public API, the only copy of these headers. They include only the C++ standard library and each other.
+- `support/RPS_UI_Framework/ImGuiPanelHost.h`: how a panel's Dear ImGui frame runs, shared by the host and by consumers' desktop previews and tests. It includes Dear ImGui, so it stays out of `include/`.
 - `docs/api/`: one page per interface, starting at `Overview.md`.
 - `src/`: the plugin. `Api.cpp` holds the tables, discovery and retired exports. `FrameworkRuntime.cpp` hosts panels, `render/PanelImGui.cpp` owns their Dear ImGui contexts and `InputService.cpp` publishes input. `WorldDrawStore.cpp` owns world drawing.
 - `tests/`: targeted tests. `ConsumerExample.cpp` is the minimal consumer, compiled with the public header test.

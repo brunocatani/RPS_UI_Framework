@@ -80,6 +80,10 @@ void RPSUI_CALL draw(const rpsui::api::framework::PanelDrawFrame* frame, void* u
 
 An ImGui context lives until the panel is unregistered or the device changes, so ImGui state such as scroll positions survives closing and reopening the panel. Unbalanced `Begin`/`End` calls are recovered without asserts.
 
+### Desktop previews and tests
+
+`support/RPS_UI_Framework/ImGuiPanelHost.h` is the code the host runs each panel frame with: context settings, the default font, input feeding and the frame. Its `LocalPanelHost` runs your setup and draw callbacks in a desktop preview or test exactly as the game does, with its own context and DX11 renderer. It includes Dear ImGui and its DX11 backend, so it is not part of the runtime API and only previews and tests use it; in the game, RPS UI Framework is the only host.
+
 ## Readiness
 
 `isFrameworkReady` reports whether the host can serve panels. Calls made before it returns true may return `FrameworkNotReady`.

@@ -3,11 +3,7 @@
 #include "Logger.h"
 #include "render/PanelImGui.h"
 
-#include <imgui.h>
-#include <imgui_impl_dx11.h>
-#include <imgui_internal.h>
-
-#include <RPS_UI_Framework/ImGuiBuild.h>
+#include <RPS_UI_Framework/ImGuiPanelHost.h>
 
 #include <cfloat>
 #include <fstream>
@@ -17,12 +13,6 @@ namespace rpsui::render::panel_imgui
 {
     namespace
     {
-        // ImGui's default style is sized for a desktop monitor; a panel is read
-        // at arm's length. Consumers set their own size in their setup callback.
-        constexpr float kDefaultFontSize = 20.0f;
-        // Scroll axes arrive in stick deflection; ImGui wants wheel units.
-        constexpr float kWheelUnitsPerSecond = 5.5f;
-
         // Immutable after prepareFonts(); every atlas borrows it.
         std::vector<char>& defaultFaceBytes() noexcept
         {
@@ -66,34 +56,6 @@ namespace rpsui::render::panel_imgui
             return *value;
         }
 
-        [[nodiscard]] api::framework::ImGuiBinding binding(ImGuiContext* context) noexcept
-        {
-            api::framework::ImGuiBinding value{};
-            value.context = context;
-            void* userData = nullptr;
-            ImGuiMemAllocFunc alloc = nullptr;
-            ImGuiMemFreeFunc free = nullptr;
-            ImGui::GetAllocatorFunctions(&alloc, &free, &userData);
-            value.alloc = alloc;
-            value.free = free;
-            value.allocUserData = userData;
-            return value;
-        }
-
-        [[nodiscard]] ImFont* addDefaultFont(ImGuiIO& io)
-        {
-            ImFontConfig config{};
-            config.SizePixels = kDefaultFontSize;
-            auto& bytes = defaultFaceBytes();
-            if (!bytes.empty()) {
-                config.FontDataOwnedByAtlas = false;
-                if (auto* font = io.Fonts->AddFontFromMemoryTTF(bytes.data(), static_cast<int>(bytes.size()),
-                        kDefaultFontSize, &config))
-                    return font;
-            }
-            return io.Fonts->AddFontDefaultVector(&config);
-        }
-
         // Builds the context and its renderer. Throws on failure.
         void createContext(PanelContext& panel, ID3D11Device* device, ID3D11DeviceContext* context,
             std::uint64_t deviceGeneration)
@@ -101,21 +63,8 @@ namespace rpsui::render::panel_imgui
             panel.context.reset(ImGui::CreateContext());
             if (!panel.context) throw std::runtime_error("ImGui context creation failed");
             ImGui::SetCurrentContext(panel.context.get());
-            auto& io = ImGui::GetIO();
-            io.IniFilename = nullptr;
-            io.LogFilename = nullptr;
-            // One input snapshot per rendered frame, applied together. Trickling
-            // splits pointer motion and the button across frames and builds a
-            // backlog while a VR hand moves.
-            io.ConfigInputTrickleEventQueue = false;
-            // A consumer's unbalanced Begin/End must not take the game down.
-            io.ConfigErrorRecovery = true;
-            io.ConfigErrorRecoveryEnableAssert = false;
-            io.ConfigErrorRecoveryEnableDebugLog = false;
-            io.ConfigErrorRecoveryEnableTooltip = false;
-            panel.defaultFont = addDefaultFont(io);
-            io.FontDefault = panel.defaultFont;
-            ImGui::GetStyle().FontSizeBase = kDefaultFontSize;
+            imgui_host::configureContext();
+            panel.defaultFont = imgui_host::addDefaultFont(defaultFaceBytes());
             if (!ImGui_ImplDX11_Init(device, context)) throw std::runtime_error("ImGui DX11 renderer initialization failed");
             panel.deviceGeneration = deviceGeneration;
             panel.contextGeneration = state().nextContextGeneration++;
@@ -129,7 +78,7 @@ namespace rpsui::render::panel_imgui
             setup.deviceGeneration = panel.deviceGeneration;
             setup.contextGeneration = panel.contextGeneration;
             setup.d3dDevice = device;
-            setup.imgui = binding(panel.context.get());
+            setup.imgui = imgui_host::currentBinding();
             setup.defaultFont = panel.defaultFont;
             snapshot.setupCallback(&setup, snapshot.userData);
             // The consumer's copy of ImGui changed only its own current
@@ -160,7 +109,6 @@ namespace rpsui::render::panel_imgui
             return nullptr;
         }
 
-        [[nodiscard]] bool finiteNonNegative(float value) noexcept { return std::isfinite(value) && value >= 0.0f; }
     }
 
     void prepareFonts() noexcept
@@ -210,40 +158,20 @@ namespace rpsui::render::panel_imgui
 
         ImGui::SetCurrentContext(panel->context.get());
         try {
-            const auto pixelWidth = static_cast<float>(snapshot.pixelWidth);
-            const auto pixelHeight = static_cast<float>(snapshot.pixelHeight);
-            const bool layout = snapshot.layoutWidth > 0.0f && snapshot.layoutHeight > 0.0f;
-            const float layoutWidth = layout ? snapshot.layoutWidth : pixelWidth;
-            const float layoutHeight = layout ? snapshot.layoutHeight : pixelHeight;
-            const float toLayoutX = layoutWidth / pixelWidth;
-            const float toLayoutY = layoutHeight / pixelHeight;
-            const bool pointerValid = snapshot.pointerValid && std::isfinite(snapshot.pointerPixelX) &&
-                std::isfinite(snapshot.pointerPixelY);
-            const float pointerX = snapshot.pointerPixelX * toLayoutX;
-            const float pointerY = snapshot.pointerPixelY * toLayoutY;
-
-            auto& io = ImGui::GetIO();
-            io.DisplaySize = { layoutWidth, layoutHeight };
-            io.DisplayFramebufferScale = { pixelWidth / layoutWidth, pixelHeight / layoutHeight };
-            io.DeltaTime = std::clamp(finiteNonNegative(deltaSeconds) ? deltaSeconds : 1.0f / 90.0f, 1.0f / 240.0f, 0.1f);
-            io.MouseDrawCursor = pointerValid;
-            io.AddMousePosEvent(pointerValid ? pointerX : -FLT_MAX, pointerValid ? pointerY : -FLT_MAX);
-            io.AddMouseButtonEvent(ImGuiMouseButton_Left, pointerValid && snapshot.primaryDown);
-            if (pointerValid && std::isfinite(snapshot.scrollAxisX) && std::isfinite(snapshot.scrollAxisY) &&
-                (snapshot.scrollAxisX != 0.0f || snapshot.scrollAxisY != 0.0f)) {
-                io.AddMouseWheelEvent(snapshot.scrollAxisX * kWheelUnitsPerSecond * io.DeltaTime,
-                    snapshot.scrollAxisY * kWheelUnitsPerSecond * io.DeltaTime);
-            }
-
-            context->OMSetRenderTargets(1, &target, nullptr);
-            D3D11_VIEWPORT viewport{};
-            viewport.Width = pixelWidth;
-            viewport.Height = pixelHeight;
-            viewport.MaxDepth = 1.0f;
-            context->RSSetViewports(1, &viewport);
-
-            ImGui_ImplDX11_NewFrame();
-            ImGui::NewFrame();
+            imgui_host::PanelInput input{};
+            input.pixelWidth = snapshot.pixelWidth;
+            input.pixelHeight = snapshot.pixelHeight;
+            input.layoutWidth = snapshot.layoutWidth;
+            input.layoutHeight = snapshot.layoutHeight;
+            input.deltaSeconds = deltaSeconds;
+            input.pointerPixelX = snapshot.pointerPixelX;
+            input.pointerPixelY = snapshot.pointerPixelY;
+            input.scrollAxisX = snapshot.scrollAxisX;
+            input.scrollAxisY = snapshot.scrollAxisY;
+            input.pointerValid = snapshot.pointerValid;
+            input.primaryDown = snapshot.primaryDown;
+            const auto fed = imgui_host::feedFrame(input);
+            imgui_host::beginFrame(context, target, snapshot.pixelWidth, snapshot.pixelHeight);
 
             api::framework::PanelDrawFrame frame{};
             frame.panelHandle = snapshot.panelHandle;
@@ -251,15 +179,15 @@ namespace rpsui::render::panel_imgui
             frame.deviceGeneration = panel->deviceGeneration;
             frame.contextGeneration = panel->contextGeneration;
             frame.d3dDevice = device;
-            frame.imgui = binding(panel->context.get());
+            frame.imgui = imgui_host::currentBinding();
             frame.defaultFont = panel->defaultFont;
             frame.pixelWidth = snapshot.pixelWidth;
             frame.pixelHeight = snapshot.pixelHeight;
-            frame.layoutWidth = layoutWidth;
-            frame.layoutHeight = layoutHeight;
-            frame.deltaSeconds = io.DeltaTime;
-            frame.pointerX = pointerValid ? pointerX : 0.0f;
-            frame.pointerY = pointerValid ? pointerY : 0.0f;
+            frame.layoutWidth = fed.layoutWidth;
+            frame.layoutHeight = fed.layoutHeight;
+            frame.deltaSeconds = fed.deltaSeconds;
+            frame.pointerX = fed.pointerX;
+            frame.pointerY = fed.pointerY;
             frame.scrollAxisX = snapshot.scrollAxisX;
             frame.scrollAxisY = snapshot.scrollAxisY;
             frame.physicalWidth = snapshot.pose.physicalWidth;
@@ -267,17 +195,15 @@ namespace rpsui::render::panel_imgui
             frame.pointerHand = snapshot.pointerHand;
             frame.hoveredResizeHandle = snapshot.hoveredResizeHandle;
             frame.activeResizeHandle = snapshot.activeResizeHandle;
-            frame.pointerValid = pointerValid ? 1 : 0;
+            frame.pointerValid = fed.pointerValid ? 1 : 0;
             frame.primaryDown = snapshot.primaryDown ? 1 : 0;
             frame.backDown = snapshot.backDown ? 1 : 0;
             snapshot.drawCallback(&frame, snapshot.userData);
 
-            // The consumer drew through its own copy of ImGui; this copy's
-            // current context is unchanged, but set it again for clarity of
-            // ownership before rendering.
+            // The consumer drew through its own copy of ImGui, whose current
+            // context is its own; this copy's is restored before rendering.
             ImGui::SetCurrentContext(panel->context.get());
-            ImGui::Render();
-            ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+            imgui_host::endFrame();
             return true;
         } catch (...) {
             log::error("Panel {} draw callback threw across its boundary; its context is rebuilt next frame",
