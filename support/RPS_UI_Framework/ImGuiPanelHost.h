@@ -226,8 +226,9 @@ namespace rpsui::imgui_host
 
         // One frame into target, which the caller cleared. input.pixelWidth and
         // pixelHeight are the target's size, the layout size when left zero.
+        // backPressed delivers one Back press on this frame.
         void frame(ID3D11RenderTargetView* target, PanelInput input,
-            api::framework::PhysicalHand pointerHand = api::framework::PhysicalHand::Right, bool backDown = false)
+            api::framework::PhysicalHand pointerHand = api::framework::PhysicalHand::Right, bool backPressed = false)
         {
             ImGui::SetCurrentContext(imgui_);
             if (!input.pixelWidth || !input.pixelHeight) {
@@ -259,7 +260,7 @@ namespace rpsui::imgui_host
             frame.pointerHand = fed.pointerValid ? pointerHand : api::framework::PhysicalHand::None;
             frame.pointerValid = fed.pointerValid ? 1 : 0;
             frame.primaryDown = input.primaryDown ? 1 : 0;
-            frame.backDown = fed.pointerValid && backDown ? 1 : 0;
+            frame.backPressed = backPressed ? 1 : 0;
             panel_.drawCallback(&frame, panel_.userData);
             ImGui::SetCurrentContext(imgui_);
             endFrame();

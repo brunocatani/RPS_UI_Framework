@@ -3,6 +3,7 @@
 #include "InputCapturePolicy.h"
 #include "NativeWandPose.h"
 #include "FrameworkRuntime.h"
+#include "Haptics.h"
 #include "PanelCooperation.h"
 #include "KeyboardCapture.h"
 #include "ModsConfigMenu.h"
@@ -185,6 +186,13 @@ void update() {
   }
  }
  if(stage!=s.failureStage){s.failureStage=stage;log::info("UI input availability stage={} (0=ready, 1=session, 2=menu, 3=OpenVR, 4=player, 5=wand, 6=Mods Config menu)",stage);}
+ // UI pulses go out only while the UI has the controllers; one asked for meanwhile is dropped.
+ for(unsigned side=0;side<2;++side) {
+  const auto length=haptics::take(side);
+  const auto device=s.devices[side].load();
+  if(length && stage==0 && device!=vr::k_unTrackedDeviceIndexInvalid)
+   if(auto* system=vr::VRSystem())system->TriggerHapticPulse(device,0,static_cast<unsigned short>(length));
+ }
  const bool yielding=stage==6;
  drainYieldedPresses(s,yielding,{s.frame.hands[0].pressed,s.frame.hands[1].pressed});
  if(yielding){s.frame.ready=false;s.frame.hands[0]={};s.frame.hands[1]={};}

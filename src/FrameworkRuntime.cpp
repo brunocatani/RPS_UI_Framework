@@ -1,7 +1,9 @@
 #include "PCH.h"
 
 #include "FrameworkRuntime.h"
+#include "Haptics.h"
 #include "InputService.h"
+#include "UiSettings.h"
 #include "PanelSeparationPolicy.h"
 
 #include "Logger.h"
@@ -22,6 +24,15 @@ namespace rpsui
         constexpr float kPointerMaximumDistance = 500.0f;
         // A sanity bound on a layout, far beyond any panel's drawing size.
         constexpr float kMaximumLayoutExtent = 16384.0f;
+        // Every PanelFlag this host implements; a registration with any other bit is refused.
+        constexpr std::uint32_t kKnownPanelFlags = [] {
+            using api::framework::PanelFlag;
+            std::uint32_t mask = 0;
+            for (const auto flag : { PanelFlag::Transparent, PanelFlag::FixedSize, PanelFlag::CircularInput,
+                     PanelFlag::ConfigNavigation, PanelFlag::Movable })
+                mask |= static_cast<std::uint32_t>(flag);
+            return mask;
+        }();
 
         [[nodiscard]] constexpr std::size_t handIndex(pointer_hand_selection::Hand hand) noexcept
         {
@@ -194,7 +205,7 @@ namespace rpsui
                 .scrollAxisY = panel.input.scrollY,
                 .pointerValid = panel.input.valid,
                 .primaryDown = panel.input.primaryDown,
-                .backDown = panel.input.backDown,
+                .backSequence = panel.backSequence,
                 .stateSequence = panel.stateSequence,
             };
         }
@@ -403,7 +414,7 @@ namespace rpsui
                 !widthsValid ||
                 !layoutValid ||
                 registration.reserved != 0 ||
-                (registration.flags & ~15u) != 0 ||
+                (registration.flags & ~kKnownPanelFlags) != 0 ||
                 (!registration.drawCallback && !numberOverlay)) {
                 return rpsui::api::Result::InvalidArgument;
             }
@@ -841,13 +852,15 @@ namespace rpsui
             if (panel->open) {
                 panel->pose = presentation.pose;
                 separateNewPanelLocked(*panel);
-                if (activeResize_.panelHandle == panelHandle) {
+                panel->presentedPose = panel->pose;
+                if (activeResize_.panelHandle == panelHandle || activeMove_.panelHandle == panelHandle) {
                     clearPointerStateLocked();
                 }
             } else {
                 panel->input = {};
                 if (pointerPanelHandle_ == panelHandle ||
-                    activeResize_.panelHandle == panelHandle) {
+                    activeResize_.panelHandle == panelHandle ||
+                    activeMove_.panelHandle == panelHandle) {
                     clearPointerStateLocked();
                 }
             }
@@ -863,7 +876,7 @@ namespace rpsui
         }
     }
 
-    rpsui::api::Result FrameworkRuntime::resetPanelSize(
+    rpsui::api::Result FrameworkRuntime::resetPanelLayout(
         std::uint64_t ownerToken,
         std::uint64_t panelHandle) noexcept
     {
@@ -877,11 +890,34 @@ namespace rpsui
                 return rpsui::api::Result::OwnershipMismatch;
             }
             if (panel->closing) return api::Result::PanelClosing;
+            if (activeResize_.panelHandle == panelHandle || activeMove_.panelHandle == panelHandle) clearPointerStateLocked();
             const float aspect = panel->layoutWidth / panel->layoutHeight;
+            panel->pose = panel->presentedPose;
             panel->pose.physicalWidth = panel->defaultPhysicalWidth;
             panel->pose.physicalHeight =
                 panel->defaultPhysicalWidth / aspect;
             ++panel->stateSequence;
+            return rpsui::api::Result::Ok;
+        } catch (...) {
+            return rpsui::api::Result::InternalError;
+        }
+    }
+
+    rpsui::api::Result FrameworkRuntime::pulseHaptic(
+        std::uint64_t ownerToken,
+        rpsui::api::framework::PhysicalHand hand,
+        float strength) const noexcept
+    {
+        try {
+            if ((hand != api::framework::PhysicalHand::Left && hand != api::framework::PhysicalHand::Right) ||
+                !std::isfinite(strength) || strength < 0.0f) {
+                return rpsui::api::Result::InvalidArgument;
+            }
+            {
+                std::scoped_lock lock(mutex_);
+                if (!hasConsumerLocked(ownerToken)) return rpsui::api::Result::OwnershipMismatch;
+            }
+            haptics::request(hand, strength);
             return rpsui::api::Result::Ok;
         } catch (...) {
             return rpsui::api::Result::InternalError;
@@ -922,7 +958,8 @@ namespace rpsui
     {
         bool config = handState_[handIndex(hand)].backPressDrain;
         for (const auto index : openPanels_)
-            config |= api::framework::hasPanelFlag(panels_[index].flags, api::framework::PanelFlag::ConfigNavigation);
+            config |= api::framework::hasPanelFlag(panels_[index].flags, api::framework::PanelFlag::ConfigNavigation) ||
+                api::framework::hasPanelFlag(panels_[index].flags, api::framework::PanelFlag::Movable);
         const bool accepted=input::captureHost(static_cast<unsigned>(handIndex(hand)), snapshot.ready, config);
         if (accepted) suppressedHands_ |= suppressionBit(hand);
         return accepted && snapshot.ready;
@@ -951,6 +988,7 @@ namespace rpsui
             state.backPressDrain |= state.backGate.neutralObserved && state.rawGripPrevious;
             pointer_click_gate::reset(state.clickGate);
             pointer_click_gate::reset(state.backGate);
+            grip_gesture::reset(state.grip);
             state.rawPrimaryPrevious = false;
             state.gameplayPressLatched = false;
             state.focusedPanel = 0;
@@ -961,6 +999,7 @@ namespace rpsui
         pointer_hand_selection::reset(pointerSelection_);
         pointerPanelHandle_ = 0;
         activeResize_ = {};
+        activeMove_ = {};
     }
 
     void FrameworkRuntime::updatePointerLocked(
@@ -1019,8 +1058,10 @@ namespace rpsui
 
             const auto* hitPanel = findPanelLocked(sample.hitPanel);
             sample.configNavigation = hitPanel && api::framework::hasPanelFlag(hitPanel->flags, api::framework::PanelFlag::ConfigNavigation);
+            sample.gripPanel = sample.configNavigation ||
+                (hitPanel && api::framework::hasPanelFlag(hitPanel->flags, api::framework::PanelFlag::Movable));
             sample.stick = {transform.stick[0], transform.stick[1]};
-            sample.rawBackAvailable = sample.configNavigation && transform.valid;
+            sample.rawBackAvailable = sample.gripPanel && transform.valid;
             sample.rawGripDown = transform.valid && input::rawButton(static_cast<unsigned>(index), 2);
             sample.rawBackDown = sample.rawBackAvailable && sample.rawGripDown;
             sample.rawAvailable = transform.valid;
@@ -1109,15 +1150,17 @@ namespace rpsui
             const bool resizing =
                 activeResize_.active &&
                 activeResize_.hand == selectedPolicyHand;
+            const bool moving = activeMove_.active && activeMove_.hand == selectedPolicyHand;
             const bool wantsLease =
                 !handState_[index].gameplayPressLatched &&
                 (samples[index].hitPanel != 0 ||
                  ownsPress ||
-                 resizing);
+                 resizing ||
+                 moving);
             if (wantsLease) {
                 if (handState_[index].focusedPanel) {
                     samples[index].leaseAccepted = input::captureHost(static_cast<unsigned>(index),
-                        snapshot.ready, samples[index].configNavigation || handState_[index].backPressDrain);
+                        snapshot.ready, samples[index].gripPanel || handState_[index].backPressDrain || moving);
                     if (samples[index].leaseAccepted) suppressedHands_ |= suppressionBit(hand);
                 } else {
                     samples[index].leaseAccepted = requestInputSuppressionLocked(snapshot, hand);
@@ -1140,7 +1183,47 @@ namespace rpsui
             samples[index].submittedBackDown = pointer_click_gate::advance(
                 handState_[index].backGate, snapshot.sequence,
                 samples[index].rawBackAvailable, samples[index].rawBackDown,
-                samples[index].leaseAccepted && samples[index].configNavigation);
+                samples[index].leaseAccepted && samples[index].gripPanel);
+        }
+
+        // Grip: a tap released on the panel is Back; held on a movable panel it carries it.
+        const auto settings = settings::current();
+        for (std::size_t index = 0; index < samples.size(); ++index) {
+            auto& sample = samples[index];
+            const auto* hit = findPanelLocked(sample.hitPanel);
+            const auto step = grip_gesture::advance(handState_[index].grip, {
+                .gatedDown = sample.submittedBackDown,
+                .rawDown = sample.rawGripDown,
+                .panel = sample.hitPanel,
+                .panelMovable = hit && api::framework::hasPanelFlag(hit->flags, api::framework::PanelFlag::Movable),
+                .seconds = snapshot.seconds,
+                .holdSeconds = settings->gripMoveSeconds,
+            });
+            if (step.back) {
+                if (auto* panel = findPanelLocked(step.back);
+                    panel && api::framework::hasPanelFlag(panel->flags, api::framework::PanelFlag::ConfigNavigation)) {
+                    ++panel->backSequence;
+                }
+            }
+            if (step.beginMove && hit && !activeResize_.active && !activeMove_.active) {
+                activeMove_ = {
+                    .active = true,
+                    .panelHandle = hit->panelHandle,
+                    .hand = pointerHand(index),
+                    .grab = panel_move::begin(hit->pose, sample.ray.origin, sample.ray.direction, sample.hitDistance),
+                    .pointerX = sample.hit.u * hit->layoutWidth,
+                    .pointerY = sample.hit.v * hit->layoutHeight,
+                    .lastSeconds = snapshot.seconds,
+                };
+                pointerPanelHandle_ = hit->panelHandle;
+                haptics::request(sdkHand(pointerHand(index)), haptics::kPressTick);
+                log::info("Panel {} moving with hand {}", hit->panelHandle, index);
+            }
+            if (step.endMove && activeMove_.active && activeMove_.hand == pointerHand(index)) {
+                log::info("Panel {} placed", activeMove_.panelHandle);
+                activeMove_ = {};
+                pointerPanelHandle_ = 0;
+            }
         }
 
         // Bounded samples distinguish pose/ray failures from capture failures
@@ -1179,6 +1262,26 @@ namespace rpsui
                 } else clearInputSuppressionLocked(pointerHand(index));
             }
         };
+
+        if (activeMove_.active) {
+            releaseUnselectedFocused(activeMove_.hand);
+            const auto& sample = samples[handIndex(activeMove_.hand)];
+            auto* panel = findPanelLocked(activeMove_.panelHandle);
+            if (!panel || !panel->open || !sample.rayValid) {
+                clearPointerStateLocked();
+                return;
+            }
+            panel_move::push(activeMove_.grab, sample.stick.y,
+                static_cast<float>(snapshot.seconds - activeMove_.lastSeconds));
+            activeMove_.lastSeconds = snapshot.seconds;
+            panel->pose = panel_move::follow(activeMove_.grab, sample.ray.origin, sample.ray.direction);
+            ++panel->stateSequence;
+            panel->input.hand = sdkHand(activeMove_.hand);
+            panel->input.valid = true;
+            panel->input.x = activeMove_.pointerX;
+            panel->input.y = activeMove_.pointerY;
+            return;
+        }
 
         if (activeResize_.active) {
             releaseUnselectedFocused(activeResize_.hand);
@@ -1364,7 +1467,6 @@ namespace rpsui
             controlsPanel && selectedCandidate.primaryDown;
         panel->input.hovered = sdkResizeHandle(resizeHandle);
 
-        panel->input.backDown = controlsPanel && sample.submittedBackDown;
         const auto stick = sample.stick;
         const auto scroll = contextual_scroll::update(
             scrollState_[selectedIndex],

@@ -21,6 +21,10 @@ namespace rpsui::settings
     {
         // Texture pixels per layout unit at a panel's default size.
         float sharpness{ 1.5f };
+        // Scales every UI controller pulse; 0 turns them off.
+        float hapticStrength{ 0.6f };
+        // How long a grip is held on a movable panel before it moves with the hand.
+        float gripMoveSeconds{ 0.45f };
         // Never null once start() ran; its revision changes with every theme change.
         std::shared_ptr<const theme_store::ThemeData> theme;
         std::uint64_t revision{ 0 };
@@ -28,6 +32,8 @@ namespace rpsui::settings
 
     inline constexpr float kMinimumSharpness = 1.0f;
     inline constexpr float kMaximumSharpness = 3.0f;
+    inline constexpr float kMinimumGripMoveSeconds = 0.2f;
+    inline constexpr float kMaximumGripMoveSeconds = 1.5f;
 
     // Plugin load thread, once.
     void start() noexcept;

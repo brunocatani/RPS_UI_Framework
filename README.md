@@ -12,8 +12,13 @@ input until it closes.
 ## Settings and themes
 
 `Documents\My Games\Fallout4VR\Mods_Config\RPS_UI_Framework\RPS_UI.toml` holds the
-panels' sharpness and the theme every mod's panels draw with. Themes are files you
-can copy, edit and share; see [Themes](docs/Themes.md).
+panels' sharpness, the theme every mod's panels draw with, how strongly the controller
+ticks when you press something on a panel, and how long to hold grip on a panel before
+it moves with your hand. Themes are files you can copy, edit and share; see
+[Themes](docs/Themes.md).
+
+On panels that allow it, hold grip on the panel to carry it, push or pull it with the
+stick, and release grip to place it. A short grip press is Back.
 
 ## For developers
 

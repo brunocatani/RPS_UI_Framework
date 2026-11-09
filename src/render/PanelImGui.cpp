@@ -1,10 +1,13 @@
 #include "PCH.h"
 
+#include "Haptics.h"
 #include "Logger.h"
 #include "UiSettings.h"
 #include "render/PanelImGui.h"
 
 #include <RPS_UI_Framework/ImGuiPanelHost.h>
+
+#include <imgui_internal.h>
 
 #include <cfloat>
 #include <map>
@@ -49,8 +52,18 @@ namespace rpsui::render::panel_imgui
             // A failed panel waits for the next theme or device.
             std::uint64_t failedThemeRevision{ 0 };
             std::uint64_t failedDeviceGeneration{ 0 };
+            // The last Back the consumer was shown; kept across context rebuilds.
+            std::uint64_t backSequence{ 0 };
             bool failed{ false };
         };
+
+        // A press that made a control active this frame, not a press on the
+        // window's empty space.
+        [[nodiscard]] bool pressActivatedControl(const ImGuiContext& g) noexcept
+        {
+            return g.ActiveIdIsJustActivated && g.ActiveId != 0 && g.ActiveIdSource == ImGuiInputSource_Mouse &&
+                !(g.ActiveIdWindow && g.ActiveId == g.ActiveIdWindow->MoveId);
+        }
 
         struct State
         {
@@ -201,12 +214,17 @@ namespace rpsui::render::panel_imgui
             frame.activeResizeHandle = snapshot.activeResizeHandle;
             frame.pointerValid = fed.pointerValid ? 1 : 0;
             frame.primaryDown = snapshot.primaryDown ? 1 : 0;
-            frame.backDown = snapshot.backDown ? 1 : 0;
+            // Back is an event: shown on exactly one frame however many input
+            // ticks passed between frames.
+            frame.backPressed = snapshot.backSequence != panel->backSequence ? 1 : 0;
+            panel->backSequence = snapshot.backSequence;
             snapshot.drawCallback(&frame, snapshot.userData);
 
             // The consumer drew through its own copy of ImGui, whose current
             // context is its own; this copy's is restored before rendering.
             ImGui::SetCurrentContext(panel->context.get());
+            if (snapshot.primaryDown && pressActivatedControl(*panel->context))
+                haptics::request(snapshot.pointerHand, haptics::kPressTick);
             imgui_host::endFrame();
             return true;
         } catch (...) {

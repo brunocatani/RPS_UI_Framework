@@ -93,13 +93,21 @@ namespace
             *presentation);
     }
 
-    Result RPSUI_CALL resetPanelSize(
+    Result RPSUI_CALL resetPanelLayout(
         std::uint64_t ownerToken,
         std::uint64_t panelHandle) noexcept
     {
-        return rpsui::FrameworkRuntime::get().resetPanelSize(
+        return rpsui::FrameworkRuntime::get().resetPanelLayout(
             ownerToken,
             panelHandle);
+    }
+
+    Result RPSUI_CALL pulseHaptic(
+        std::uint64_t ownerToken,
+        framework::PhysicalHand hand,
+        float strength) noexcept
+    {
+        return rpsui::FrameworkRuntime::get().pulseHaptic(ownerToken, hand, strength);
     }
 
     Result RPSUI_CALL getPanelState(
@@ -123,8 +131,9 @@ namespace
         .registerPanel = &registerPanel,
         .unregisterPanel = &unregisterPanel,
         .submitPanelPresentation = &submitPanelPresentation,
-        .resetPanelSize = &resetPanelSize,
+        .resetPanelLayout = &resetPanelLayout,
         .getPanelState = &getPanelState,
+        .pulseHaptic = &pulseHaptic,
     };
 
     Result RPSUI_CALL registerCooperativePanel(std::uint64_t owner,

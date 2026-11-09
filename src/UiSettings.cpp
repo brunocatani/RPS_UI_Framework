@@ -15,6 +15,7 @@ namespace rpsui::settings
         using namespace std::chrono_literals;
 
         constexpr std::string_view kDisplay = "Display";
+        constexpr std::string_view kControls = "Controls";
 
         std::vector<RPS::Settings::Definition> definitions()
         {
@@ -29,6 +30,14 @@ namespace rpsui::settings
                     "A panel shown larger gets more pixels, so it stays as sharp.\n"
                     "Higher is sharper text and uses more video memory. 1.0 to 3.0.",
                     RPS::Settings::Group::Player, RPS::Settings::ValueType::Float, "1.5" },
+                { std::string(kControls), "HapticStrength", "Controls",
+                    "How strongly the controller ticks when you press something on a panel, and every other\n"
+                    "pulse a mod's panel asks for. 0 turns them off, 1 is the strongest. 0.0 to 1.0.",
+                    RPS::Settings::Group::Player, RPS::Settings::ValueType::Float, "0.6" },
+                { std::string(kControls), "GripMoveSeconds", "Controls",
+                    "Seconds to hold grip on a panel that can be moved before it follows your hand; release to\n"
+                    "place it. A shorter grip press is Back. 0.2 to 1.5.",
+                    RPS::Settings::Group::Player, RPS::Settings::ValueType::Float, "0.45" },
             };
         }
 
@@ -86,6 +95,9 @@ namespace rpsui::settings
             const auto previous = value.current.load(std::memory_order_acquire);
             auto next = std::make_shared<Snapshot>();
             next->sharpness = floatValue(*value.store, kDisplay, "Sharpness", next->sharpness, kMinimumSharpness, kMaximumSharpness);
+            next->hapticStrength = floatValue(*value.store, kControls, "HapticStrength", next->hapticStrength, 0.0f, 1.0f);
+            next->gripMoveSeconds = floatValue(*value.store, kControls, "GripMoveSeconds", next->gripMoveSeconds,
+                kMinimumGripMoveSeconds, kMaximumGripMoveSeconds);
             const auto* themeSetting = value.store->find(kDisplay, "Theme");
             const std::string themeName = themeSetting ? themeSetting->value : std::string(theme_defaults::kName);
             if (reloadTheme || !previous->theme || themeName != value.themeName) {
@@ -96,8 +108,8 @@ namespace rpsui::settings
                 next->theme = previous->theme;
             }
             next->revision = value.store->revision();
-            log::info("RPS UI settings {}: theme '{}', sharpness {:.2f}", startup ? "loaded" : "reloaded", next->theme->theme.name,
-                next->sharpness);
+            log::info("RPS UI settings {}: theme '{}', sharpness {:.2f}, haptic strength {:.2f}, grip move {:.2f} s",
+                startup ? "loaded" : "reloaded", next->theme->theme.name, next->sharpness, next->hapticStrength, next->gripMoveSeconds);
             value.current.store(std::move(next), std::memory_order_release);
         }
 

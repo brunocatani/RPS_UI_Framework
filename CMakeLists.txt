@@ -161,7 +161,7 @@ if(RPS_UI_FRAMEWORK_BUILD_TESTS)
   add_test(NAME RPSUIFramework.GraphicsStateCommit COMMAND RPSUIGraphicsStateCommitTests)
   # Exercise actual exported tables, registries and input subscriptions. The
   # test never installs native hooks; scene-depth demand is stubbed.
-  add_executable(RPSUIRegistryTests tests/RegistryTests.cpp src/FrameworkRuntime.cpp src/Api.cpp src/WorldDrawStore.cpp src/RequiredUpdates.cpp src/KeyboardCapture.cpp src/ModsConfigMenu.cpp src/render/PanelImGui.cpp src/UiSettings.cpp src/ThemeStore.cpp)
+  add_executable(RPSUIRegistryTests tests/RegistryTests.cpp src/FrameworkRuntime.cpp src/Api.cpp src/WorldDrawStore.cpp src/RequiredUpdates.cpp src/KeyboardCapture.cpp src/ModsConfigMenu.cpp src/render/PanelImGui.cpp src/UiSettings.cpp src/ThemeStore.cpp src/Haptics.cpp)
   target_compile_features(RPSUIRegistryTests PRIVATE cxx_std_23)
   target_compile_definitions(RPSUIRegistryTests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX NOMMNOSOUND)
   target_include_directories(RPSUIRegistryTests PRIVATE "${SOURCE_DIR}" "${PUBLIC_INCLUDE_DIR}")

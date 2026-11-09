@@ -1,6 +1,8 @@
 #pragma once
 
 #include "ContextualScrollPolicy.h"
+#include "GripGesture.h"
+#include "PanelMovePolicy.h"
 #include "PanelResizePolicy.h"
 #include "PointerClickGate.h"
 #include "PointerHandSelection.h"
@@ -66,7 +68,8 @@ namespace rpsui
         float scrollAxisY{ 0.0f };
         bool pointerValid{ false };
         bool primaryDown{ false };
-        bool backDown{ false };
+        // Rises once for each Back press.
+        std::uint64_t backSequence{ 0 };
         std::uint64_t stateSequence{ 0 };
     };
 
@@ -127,9 +130,13 @@ namespace rpsui
             std::uint64_t ownerToken,
             std::uint64_t panelHandle,
             const rpsui::api::framework::PanelPresentation& presentation) noexcept;
-        [[nodiscard]] rpsui::api::Result resetPanelSize(
+        [[nodiscard]] rpsui::api::Result resetPanelLayout(
             std::uint64_t ownerToken,
             std::uint64_t panelHandle) noexcept;
+        [[nodiscard]] rpsui::api::Result pulseHaptic(
+            std::uint64_t ownerToken,
+            rpsui::api::framework::PhysicalHand hand,
+            float strength) const noexcept;
         [[nodiscard]] rpsui::api::Result getPanelState(
             std::uint64_t ownerToken,
             std::uint64_t panelHandle,
@@ -180,7 +187,6 @@ namespace rpsui
             float scrollY{ 0.0f };
             bool valid{ false };
             bool primaryDown{ false };
-            bool backDown{ false };
         };
 
         struct PanelRecord
@@ -205,7 +211,10 @@ namespace rpsui
             void* userData{ nullptr };
             std::shared_ptr<PanelCallbackGate> callbackGate;
             rpsui::api::framework::PanelPose pose{};
+            // Where the owner last presented it; resetPanelLayout returns here.
+            rpsui::api::framework::PanelPose presentedPose{};
             PanelInput input{};
+            std::uint64_t backSequence{ 0 };
             std::uint64_t submittedSequence{ 0 };
             std::uint64_t stateSequence{ 1 };
             bool open{ false };
@@ -226,6 +235,8 @@ namespace rpsui
             bool submittedPrimaryDown{ false };
             contextual_scroll::Stick stick{};
             bool configNavigation{ false };
+            // The hit panel takes the grip: Back, a move, or both.
+            bool gripPanel{ false };
             bool rawBackAvailable{ false };
             bool rawBackDown{ false };
             bool rawGripDown{ false };
@@ -245,6 +256,7 @@ namespace rpsui
             // on a hand as the whole hand being the UI's, so this includes its trigger.
             bool focusedPressDrain{};
             bool backPressDrain{};
+            grip_gesture::State grip{};
         };
 
         struct ActiveResize
@@ -256,6 +268,18 @@ namespace rpsui
             };
             panel_resize::Drag drag{};
             rpsui::api::framework::PanelPose initialPose{};
+        };
+
+        struct ActiveMove
+        {
+            bool active{ false };
+            std::uint64_t panelHandle{ 0 };
+            pointer_hand_selection::Hand hand{ pointer_hand_selection::Hand::None };
+            panel_move::Grab grab{};
+            // Layout units: where the pointer holds the panel.
+            float pointerX{ 0.0f };
+            float pointerY{ 0.0f };
+            double lastSeconds{ 0.0 };
         };
 
         FrameworkRuntime();
@@ -315,6 +339,7 @@ namespace rpsui
         unsigned pointerTraceSamples_{ 0 };
         double pointerTraceNextTime_{ 0 };
         ActiveResize activeResize_{};
+        ActiveMove activeMove_{};
         std::uint8_t suppressedHands_{ 0 };
         bool numberInputReady_{};
     };

@@ -17,6 +17,9 @@ namespace rpsui::api::framework
         CircularInput = 1u << 2,
         // Opt in to raw stick handoff and grip-back. Hold-based wheels leave this unset.
         ConfigNavigation = 1u << 3,
+        // The player may carry the panel: grip held on it past the player's hold
+        // time moves it with the hand until released; the stick pushes and pulls it.
+        Movable = 1u << 4,
     };
 
     [[nodiscard]] constexpr bool hasPanelFlag(std::uint32_t flags, PanelFlag flag) noexcept
@@ -238,7 +241,8 @@ namespace rpsui::api::framework
         ResizeHandle activeResizeHandle{ ResizeHandle::None };
         std::uint8_t pointerValid{ 0 };
         std::uint8_t primaryDown{ 0 };
-        std::uint8_t backDown{ 0 }; // Gated physical grip of the pointing hand; derive edges locally.
+        // 1 on the one frame after a Back press: a grip tap released on this panel.
+        std::uint8_t backPressed{ 0 };
         std::uint8_t reservedBytes[1]{};
     };
 
@@ -308,8 +312,13 @@ namespace rpsui::api::framework
         Result(RPSUI_CALL* unregisterPanel)(std::uint64_t ownerToken, std::uint64_t panelHandle) noexcept {};
         Result(RPSUI_CALL* submitPanelPresentation)(std::uint64_t ownerToken, std::uint64_t panelHandle,
             const PanelPresentation* presentation) noexcept {};
-        Result(RPSUI_CALL* resetPanelSize)(std::uint64_t ownerToken, std::uint64_t panelHandle) noexcept {};
+        // Puts the panel back at the pose it was last presented with, at its default size.
+        Result(RPSUI_CALL* resetPanelLayout)(std::uint64_t ownerToken, std::uint64_t panelHandle) noexcept {};
         Result(RPSUI_CALL* getPanelState)(std::uint64_t ownerToken, std::uint64_t panelHandle, PanelState* outState) noexcept {};
+        // A controller pulse, strength 0 to 1, scaled by the player's haptic
+        // strength. Any thread; sent on the next input tick while the UI has the
+        // controllers, dropped otherwise.
+        Result(RPSUI_CALL* pulseHaptic)(std::uint64_t ownerToken, PhysicalHand hand, float strength) noexcept {};
     };
 
     static_assert(std::is_standard_layout_v<ConsumerRegistration> && sizeof(ConsumerRegistration) == 168);
@@ -324,6 +333,6 @@ namespace rpsui::api::framework
     static_assert(std::is_standard_layout_v<PanelRegistration> && sizeof(PanelRegistration) == 280);
     static_assert(std::is_standard_layout_v<PanelPresentation> && sizeof(PanelPresentation) == 80);
     static_assert(std::is_standard_layout_v<PanelState> && sizeof(PanelState) == 88);
-    static_assert(std::is_standard_layout_v<Api> && sizeof(Api) == 64);
+    static_assert(std::is_standard_layout_v<Api> && sizeof(Api) == 72);
 }
 #pragma pack(pop)

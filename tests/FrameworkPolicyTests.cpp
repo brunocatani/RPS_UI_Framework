@@ -1,4 +1,6 @@
 #include "ContextualScrollPolicy.h"
+#include "GripGesture.h"
+#include "PanelMovePolicy.h"
 #include "InputCapturePolicy.h"
 #include "KeyboardCapturePolicy.h"
 #include "NativeWandPose.h"
@@ -99,7 +101,7 @@ namespace
         require(queue.push(input::KeyboardEventKind::Key, 999), "drained keyboard queue did not reopen");
         queue.clear();
         require(queue.drain(events) == 0, "cleared keyboard queue kept keys for the next owner");
-        static_assert(offsetof(framework::PanelDrawFrame, backDown) == 178);
+        static_assert(offsetof(framework::PanelDrawFrame, backPressed) == 178);
         static_assert(offsetof(framework::PanelRegistration, flags) == 192);
         static_assert(offsetof(framework::PanelRegistration, imgui) == 200);
         static_assert(offsetof(framework::PanelRegistration, drawCallback) == 264);
@@ -252,6 +254,56 @@ namespace
         require(kSpecialSubmitCallsiteRva == 0x1D8DC25, "special callsite changed");
         require(kFullSubmitBoundary.size() == 22, "full guard size changed");
     }
+
+    // Back is delivered on the release, so no part of the press reaches the game
+    // after the panel closes; a hold on a movable panel moves it and is not Back.
+    void testGripGesture()
+    {
+        using namespace rpsui::grip_gesture;
+        State state;
+        const auto at = [](bool gated, bool raw, std::uint64_t panel, bool movable, double seconds) {
+            return Sample{ .gatedDown = gated, .rawDown = raw, .panel = panel, .panelMovable = movable,
+                .seconds = seconds, .holdSeconds = 0.45 };
+        };
+        require(!advance(state, at(true, true, 7, false, 0.0)).back, "Back on the grip press edge");
+        require(!advance(state, at(true, true, 7, false, 0.8)).beginMove, "a fixed panel started moving");
+        require(advance(state, at(false, false, 7, false, 0.9)).back == 7, "a released grip tap was not Back");
+
+        reset(state);
+        (void)advance(state, at(true, true, 7, false, 0.0));
+        (void)advance(state, at(false, true, 0, false, 0.1));
+        require(!advance(state, at(false, false, 0, false, 0.2)).back, "a press that left the panel became Back");
+
+        reset(state);
+        (void)advance(state, at(true, true, 9, true, 0.0));
+        require(!advance(state, at(true, true, 9, true, 0.2)).beginMove, "a move began before the hold time");
+        require(advance(state, at(true, true, 9, true, 0.5)).beginMove == 9, "a held grip did not move the panel");
+        require(advance(state, at(false, true, 0, true, 0.6)).moving, "a move stopped while the grip was held");
+        const auto released = advance(state, at(false, false, 0, true, 0.7));
+        require(released.endMove && !released.back, "releasing a moved panel was Back");
+    }
+
+    void testPanelMove()
+    {
+        using namespace rpsui::panel_move;
+        rpsui::api::framework::PanelPose pose{};
+        pose.center[0] = 0; pose.center[1] = 100; pose.center[2] = 120;
+        const Vector origin{ 0, 0, 100 }, ahead{ 0, 1, 0 }, left{ -1, 0, 0 };
+        auto grab = begin(pose, origin, ahead, 100);
+        const auto still = follow(grab, origin, ahead);
+        require(std::abs(still.center[1] - 100) < 1e-3f && std::abs(still.center[2] - 120) < 1e-3f,
+            "an unmoved hand moved the panel");
+        const auto turned = follow(grab, origin, left);
+        require(std::abs(turned.center[0] + 100) < 1e-3f && std::abs(turned.center[1]) < 1e-3f &&
+            std::abs(turned.center[2] - 120) < 1e-3f, "the panel left the end of the turned ray");
+        require(std::abs(turned.right[0]) < 1e-3f && std::abs(turned.right[1] - 1) < 1e-3f, "the panel did not turn with the hand");
+        require(std::abs(turned.up[2] - 1) < 1e-3f, "a carried panel tilted");
+        push(grab, 1.0f, 0.05f);
+        require(grab.distance > 100, "a forward stick did not push the panel away");
+        auto near = begin(pose, origin, ahead, 10);
+        push(near, 1.0f, 0.05f);
+        require(near.distance > 10 && near.distance < kMinimumDistance, "a near panel jumped into range");
+    }
 }
 
 int main()
@@ -282,6 +334,8 @@ int main()
         testResize();
         testContextualScroll();
         testStereoPolicy();
+        testGripGesture();
+        testPanelMove();
         std::cout << "RPS UI Framework policy tests passed\n";
         return 0;
     } catch (const std::exception& error) {

@@ -31,10 +31,17 @@ Registers consumers and world panels, submits panel poses and reads panel state.
 | `FixedSize` | The user cannot resize the panel |
 | `CircularInput` | Hit testing uses the inscribed circle (`panelContains`) |
 | `ConfigNavigation` | Opts in to raw stick handoff and grip-back; hold-based wheels leave this unset |
+| `Movable` | The player can carry the panel: grip held on it moves it with the hand, the stick pushes and pulls it, and releasing the grip places it |
 
 ## Presenting
 
-`submitPanelPresentation` sends a `PanelPresentation` with a rising `sequence`, a `PanelPose` in game units and the `open` state. The pose's width must be within the registered limits; its height may be anything positive. The layout is scaled onto the panel on each axis, so a height off the layout's shape stretches the drawing. `getPanelState` returns the current pose, pointer hand and resize state. `resetPanelSize` returns the panel to its default width.
+`submitPanelPresentation` sends a `PanelPresentation` with a rising `sequence`, a `PanelPose` in game units and the `open` state. The pose's width must be within the registered limits; its height may be anything positive. The layout is scaled onto the panel on each axis, so a height off the layout's shape stretches the drawing. `getPanelState` returns the current pose, pointer hand and resize state; the pose includes the player's resizing and carrying, and `sequence` rises when either changes it. `resetPanelLayout` returns the panel to the pose it was last presented with, at its default width.
+
+### Grip and haptics
+
+On a `ConfigNavigation` or `Movable` panel the grip belongs to the UI while the pointer is on the panel. A grip press released before the player's hold time (`GripMoveSeconds` in `RPS_UI.toml`) is Back, delivered on the release, so no part of the press reaches the game after Back closes the panel. On a `Movable` panel a grip held past the hold time carries the panel instead, and is not Back.
+
+The host pulses the pointing controller when a press makes an ImGui control active, and when a carry starts. `pulseHaptic` sends your own pulse, for presses ImGui does not see such as hand-drawn controls: strength 0 to 1, scaled by the player's `HapticStrength`, from any thread. A pulse is sent on the next input tick while the UI has the controllers, and dropped otherwise.
 
 ## Resolution
 
@@ -77,7 +84,7 @@ void RPSUI_CALL draw(const rpsui::api::framework::PanelDrawFrame* frame, void* u
 
 `setupCallback` receives a `PanelSetup` once per context, before its first frame: on the panel's first draw, after a device change, after a theme change, and after the host rebuilt a context whose draw failed. The theme's style and faces are already in place (see [Themes](#themes)); add your own fonts, adjust the style and create textures there. Fonts and textures you add belong to that context; `contextGeneration` changes when it is replaced, and anything made for the old one must be made again. `style.FontSizeBase` is left unset, so the first frame takes the size of whatever font is `io.FontDefault` then: the theme's Interface face at its body size, or a font your setup callback installs.
 
-`drawCallback` receives a `PanelDrawFrame` between the host's `NewFrame` and `Render`. Before calling it, the host has set the display size, fed the pointer position, the primary button and the scroll axes, and turned the software cursor on while the pointer is valid. You may change `io.MouseDrawCursor` during the frame. The frame's coordinates are in layout units, the same as ImGui's `DisplaySize` and `MousePos`. `backDown` is the gated physical grip of the pointing hand; derive edges from it locally.
+`drawCallback` receives a `PanelDrawFrame` between the host's `NewFrame` and `Render`. Before calling it, the host has set the display size, fed the pointer position, the primary button and the scroll axes, and turned the software cursor on while the pointer is valid. You may change `io.MouseDrawCursor` during the frame. The frame's coordinates are in layout units, the same as ImGui's `DisplaySize` and `MousePos`. `backPressed` is 1 on exactly one frame after each Back press on a `ConfigNavigation` panel (see [Grip and haptics](#grip-and-haptics)).
 
 `d3dDevice` is the `ID3D11Device` for your own textures (`ImTextureID` is an `ID3D11ShaderResourceView*`). There is no render target or device context: the host renders the frame into the panel's own texture. Rebuild device textures when `deviceGeneration` changes.
 
