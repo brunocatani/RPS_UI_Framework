@@ -114,7 +114,6 @@ namespace
         // Read here: panel contexts are built on the render thread, which
         // never does file I/O.
         rpsui::settings::start();
-        rpsui::render::panel_imgui::prepareFonts();
         auto& runtime = rpsui::FrameworkRuntime::get();
         if (!rpsui::render::SceneDepthCapture::Install()) {
             runtime.setHookStatus(rpsui::api::cooperation::HookStatus::Unavailable);

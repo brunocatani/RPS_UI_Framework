@@ -12,21 +12,19 @@ struct ID3D11RenderTargetView;
 
 /*
  * The host's Dear ImGui: one context per registered panel, with its DX11
- * renderer and font atlas. A context lives from the panel's first drawn frame
- * until the panel is unregistered or the device changes, so ImGui state
- * (scroll, open trees, fonts the consumer added) survives closing and
- * reopening the panel.
+ * renderer and font atlas, styled by the player's theme. A context lives from
+ * the panel's first drawn frame until the panel is unregistered, the device
+ * changes or the theme changes, so ImGui state (scroll, open trees, fonts the
+ * consumer added) survives closing and reopening the panel.
  *
- * Thread model: every function except retire() and prepareFonts() runs on the
- * render thread with the host renderer's render mutex held, which also owns
- * this DLL's current ImGui context. retire() may run on any thread; the
- * context is destroyed on the next render.
+ * Thread model: every function except retire() runs on the render thread with
+ * the host renderer's render mutex held, which also owns this DLL's current
+ * ImGui context. retire() may run on any thread; the context is destroyed on
+ * the next render. The theme and its face bytes come from the settings
+ * snapshot, which the render thread only reads.
  */
 namespace rpsui::render::panel_imgui
 {
-    // Plugin load, before any render: reads the default text face once.
-    void prepareFonts() noexcept;
-
     // The host's build, compared against each consumer's at registration.
     [[nodiscard]] api::framework::ImGuiBuild hostBuild() noexcept;
     [[nodiscard]] bool buildMatches(const api::framework::ImGuiBuild& consumer) noexcept;

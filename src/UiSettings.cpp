@@ -4,6 +4,7 @@
 #include "UiSettings.h"
 
 #include <RPS/Settings/Store.h>
+#include <RPS_UI_Framework/ThemeDefaults.h>
 
 #include <ShlObj.h>
 
@@ -18,6 +19,11 @@ namespace rpsui::settings
         std::vector<RPS::Settings::Definition> definitions()
         {
             return {
+                { std::string(kDisplay), "Theme", "Display",
+                    "The theme every mod's panels draw with: a file in the Themes folder, without .toml.\n"
+                    "Copy RobCo.toml there under a new name to make your own; a name with no file starts as a\n"
+                    "copy of RobCo.",
+                    RPS::Settings::Group::Player, RPS::Settings::ValueType::String, std::string(theme_defaults::kName) },
                 { std::string(kDisplay), "Sharpness", "Display",
                     "Texture pixels for each unit of a panel's layout, at the panel's default size.\n"
                     "A panel shown larger gets more pixels, so it stays as sharp.\n"
@@ -29,8 +35,12 @@ namespace rpsui::settings
         struct State
         {
             std::atomic<std::shared_ptr<const Snapshot>> current{ std::make_shared<const Snapshot>() };
-            // The store is used by the load thread once, then only by the watcher.
+            // Load thread once, then only the watcher.
+            std::filesystem::path directory;
             std::unique_ptr<RPS::Settings::Store> store;
+            std::string themeName;
+            std::filesystem::path themeFile;
+            std::uint64_t themeRevision{ 0 };
             std::jthread watcher;
         };
 
@@ -65,18 +75,62 @@ namespace rpsui::settings
             return clamped;
         }
 
-        // Reads the file into a new snapshot. Throws on a store failure.
-        void load(bool startup)
+        // Reads RPS_UI.toml, and the theme when its name changed or reloadTheme
+        // is set, into a new snapshot. Throws on a store failure.
+        void load(bool startup, bool reloadTheme)
         {
             auto& value = state();
             value.store->load(startup);
             for (const auto& notice : value.store->notices()) log::info("{}", notice);
             for (const auto& message : value.store->messages()) log::warn("{}", message);
+            const auto previous = value.current.load(std::memory_order_acquire);
             auto next = std::make_shared<Snapshot>();
             next->sharpness = floatValue(*value.store, kDisplay, "Sharpness", next->sharpness, kMinimumSharpness, kMaximumSharpness);
+            const auto* themeSetting = value.store->find(kDisplay, "Theme");
+            const std::string themeName = themeSetting ? themeSetting->value : std::string(theme_defaults::kName);
+            if (reloadTheme || !previous->theme || themeName != value.themeName) {
+                next->theme = theme_store::load(value.directory, themeName, ++value.themeRevision);
+                value.themeName = themeName;
+                value.themeFile = next->theme->file;
+            } else {
+                next->theme = previous->theme;
+            }
             next->revision = value.store->revision();
-            log::info("RPS UI settings {}: sharpness {:.2f}", startup ? "loaded" : "reloaded", next->sharpness);
+            log::info("RPS UI settings {}: theme '{}', sharpness {:.2f}", startup ? "loaded" : "reloaded", next->theme->theme.name,
+                next->sharpness);
             value.current.store(std::move(next), std::memory_order_release);
+        }
+
+        // Polls both files: RPS_UI.toml and the theme it names.
+        void watch(std::stop_token stop, std::filesystem::path settingsFile)
+        {
+            auto& value = state();
+            std::error_code error;
+            auto settingsWritten = std::filesystem::last_write_time(settingsFile, error);
+            auto themeFile = value.themeFile;
+            auto themeWritten = std::filesystem::last_write_time(themeFile, error);
+            while (!stop.stop_requested()) {
+                std::this_thread::sleep_for(250ms);
+                error.clear();
+                const auto settingsNow = std::filesystem::last_write_time(settingsFile, error);
+                const bool settingsChanged = !error && settingsNow != settingsWritten;
+                error.clear();
+                const auto themeNow = std::filesystem::last_write_time(themeFile, error);
+                const bool themeChanged = !error && themeNow != themeWritten;
+                if (!settingsChanged && !themeChanged) continue;
+                // Let the writer finish before reading.
+                std::this_thread::sleep_for(250ms);
+                if (stop.stop_requested()) break;
+                try {
+                    load(false, themeChanged);
+                } catch (const std::exception& failure) {
+                    log::warn("RPS UI settings could not be reread: {}; the last values stay", failure.what());
+                }
+                // The theme file may have changed with the name; take both times after the read.
+                settingsWritten = std::filesystem::last_write_time(settingsFile, error);
+                themeFile = value.themeFile;
+                themeWritten = std::filesystem::last_write_time(themeFile, error);
+            }
         }
     }
 
@@ -85,43 +139,35 @@ namespace rpsui::settings
         auto& value = state();
         if (value.store) return;
         try {
-            const auto directory = configDirectory();
-            if (directory.empty()) {
+            value.directory = configDirectory();
+            if (value.directory.empty()) {
                 log::warn("RPS UI settings: Documents is unavailable; built-in defaults apply");
+                auto next = std::make_shared<Snapshot>();
+                next->theme = theme_store::builtIn({}, ++value.themeRevision);
+                value.current.store(std::move(next), std::memory_order_release);
                 return;
             }
             value.store = std::make_unique<RPS::Settings::Store>(RPS::Settings::Files{
-                .directory = directory,
+                .directory = value.directory,
                 .modName = "RPS UI",
                 .playerFileName = "RPS_UI.toml",
-                .playerHeader = "RPS UI Framework settings. Every mod's panels follow them.",
+                .playerHeader =
+                    "## RPS_UI.toml - RPS UI Framework options\n"
+                    "## Every mod's world panels follow them. Change them in the RobCo PALM wheel menu, or edit this\n"
+                    "## file. Changes apply while the game runs.\n"
+                    "## Each option has its help above it. Your own notes are kept when they start with a single #.\n",
             }, definitions());
-            load(true);
+            load(true, true);
         } catch (const std::exception& error) {
             log::error("RPS UI settings could not be read: {}; built-in defaults apply", error.what());
+            if (!value.current.load()->theme) {
+                auto next = std::make_shared<Snapshot>();
+                next->theme = theme_store::builtIn(value.directory, ++value.themeRevision);
+                value.current.store(std::move(next), std::memory_order_release);
+            }
             if (!value.store) return;
         }
-
-        const auto path = value.store->path(RPS::Settings::Group::Player);
-        value.watcher = std::jthread([path](std::stop_token stop) {
-            std::error_code error;
-            auto observed = std::filesystem::last_write_time(path, error);
-            while (!stop.stop_requested()) {
-                std::this_thread::sleep_for(250ms);
-                error.clear();
-                const auto written = std::filesystem::last_write_time(path, error);
-                if (error || written == observed) continue;
-                observed = written;
-                // Let the writer finish before reading.
-                std::this_thread::sleep_for(250ms);
-                if (stop.stop_requested()) break;
-                try {
-                    load(false);
-                } catch (const std::exception& failure) {
-                    log::warn("RPS UI settings could not be reread: {}; the last values stay", failure.what());
-                }
-            }
-        });
+        value.watcher = std::jthread(watch, value.store->path(RPS::Settings::Group::Player));
     }
 
     std::shared_ptr<const Snapshot> current() noexcept

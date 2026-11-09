@@ -1,23 +1,30 @@
 #include "PCH.h"
 
 #include "Logger.h"
+#include "UiSettings.h"
 #include "render/PanelImGui.h"
 
 #include <RPS_UI_Framework/ImGuiPanelHost.h>
 
 #include <cfloat>
-#include <fstream>
 #include <map>
 
 namespace rpsui::render::panel_imgui
 {
     namespace
     {
-        // Immutable after prepareFonts(); every atlas borrows it.
-        std::vector<char>& defaultFaceBytes() noexcept
+        // Before the settings start, and in tests: the built-in theme with ImGui's own face.
+        [[nodiscard]] const std::shared_ptr<const theme_store::ThemeData>& fallbackTheme() noexcept
         {
-            static auto* bytes = new std::vector<char>();
-            return *bytes;
+            static auto* value = new std::shared_ptr<const theme_store::ThemeData>(
+                std::make_shared<theme_store::ThemeData>(theme_store::ThemeData{ .theme = theme_defaults::robco() }));
+            return *value;
+        }
+
+        [[nodiscard]] std::shared_ptr<const theme_store::ThemeData> currentTheme() noexcept
+        {
+            auto theme = settings::current()->theme;
+            return theme ? theme : fallbackTheme();
         }
 
         struct ContextDeleter
@@ -33,10 +40,15 @@ namespace rpsui::render::panel_imgui
 
         struct PanelContext
         {
+            // Declared first so it outlives the context: the atlas borrows its face bytes.
+            std::shared_ptr<const theme_store::ThemeData> theme;
             std::unique_ptr<ImGuiContext, ContextDeleter> context;
-            ImFont* defaultFont{ nullptr };
+            imgui_host::FontSet fonts{};
             std::uint64_t deviceGeneration{ 0 };
             std::uint64_t contextGeneration{ 0 };
+            // A failed panel waits for the next theme or device.
+            std::uint64_t failedThemeRevision{ 0 };
+            std::uint64_t failedDeviceGeneration{ 0 };
             bool failed{ false };
         };
 
@@ -58,13 +70,19 @@ namespace rpsui::render::panel_imgui
 
         // Builds the context and its renderer. Throws on failure.
         void createContext(PanelContext& panel, ID3D11Device* device, ID3D11DeviceContext* context,
-            std::uint64_t deviceGeneration)
+            std::uint64_t deviceGeneration, std::shared_ptr<const theme_store::ThemeData> theme)
         {
+            panel.context.reset();
+            panel.theme = std::move(theme);
             panel.context.reset(ImGui::CreateContext());
             if (!panel.context) throw std::runtime_error("ImGui context creation failed");
             ImGui::SetCurrentContext(panel.context.get());
             imgui_host::configureContext();
-            panel.defaultFont = imgui_host::addDefaultFont(defaultFaceBytes());
+            imgui_host::applyTheme(panel.theme->theme);
+            imgui_host::FaceSet faces{};
+            for (std::size_t role = 0; role < faces.size(); ++role)
+                if (panel.theme->faces[role]) faces[role] = *panel.theme->faces[role];
+            panel.fonts = imgui_host::addThemeFonts(panel.theme->theme, faces);
             if (!ImGui_ImplDX11_Init(device, context)) throw std::runtime_error("ImGui DX11 renderer initialization failed");
             panel.deviceGeneration = deviceGeneration;
             panel.contextGeneration = state().nextContextGeneration++;
@@ -79,7 +97,8 @@ namespace rpsui::render::panel_imgui
             setup.contextGeneration = panel.contextGeneration;
             setup.d3dDevice = device;
             setup.imgui = imgui_host::currentBinding();
-            setup.defaultFont = panel.defaultFont;
+            setup.theme = &panel.theme->theme;
+            for (std::size_t role = 0; role < panel.fonts.size(); ++role) setup.fonts[role] = panel.fonts[role];
             snapshot.setupCallback(&setup, snapshot.userData);
             // The consumer's copy of ImGui changed only its own current
             // context; this DLL's is restored for the frame regardless.
@@ -90,14 +109,19 @@ namespace rpsui::render::panel_imgui
             std::uint64_t deviceGeneration, const RenderPanelSnapshot& snapshot) noexcept
         {
             auto& panel = state().panels[snapshot.panelHandle];
-            if (panel.failed) return nullptr;
-            if (panel.context && panel.deviceGeneration == deviceGeneration) return &panel;
+            auto theme = currentTheme();
+            const auto themeRevision = theme->theme.revision;
+            if (panel.failed) {
+                if (panel.failedThemeRevision == themeRevision && panel.failedDeviceGeneration == deviceGeneration) return nullptr;
+                panel.failed = false;
+            }
+            if (panel.context && panel.deviceGeneration == deviceGeneration && panel.theme->theme.revision == themeRevision)
+                return &panel;
             try {
-                panel.context.reset();
-                createContext(panel, device, context, deviceGeneration);
+                createContext(panel, device, context, deviceGeneration, std::move(theme));
                 runSetup(panel, snapshot, device);
-                log::info("Panel {} ImGui context ready (device generation {}, context generation {})",
-                    snapshot.panelHandle, deviceGeneration, panel.contextGeneration);
+                log::info("Panel {} ImGui context ready (device generation {}, context generation {}, theme '{}')",
+                    snapshot.panelHandle, deviceGeneration, panel.contextGeneration, panel.theme->theme.name);
                 return &panel;
             } catch (const std::exception& error) {
                 log::error("Panel {} ImGui context failed: {}", snapshot.panelHandle, error.what());
@@ -106,32 +130,11 @@ namespace rpsui::render::panel_imgui
             }
             panel.context.reset();
             panel.failed = true;
+            panel.failedThemeRevision = themeRevision;
+            panel.failedDeviceGeneration = deviceGeneration;
             return nullptr;
         }
 
-    }
-
-    void prepareFonts() noexcept
-    {
-        try {
-            auto& bytes = defaultFaceBytes();
-            if (!bytes.empty()) return;
-            wchar_t directory[MAX_PATH]{};
-            if (!GetWindowsDirectoryW(directory, MAX_PATH)) return;
-            const auto path = std::filesystem::path(directory) / "Fonts" / "consola.ttf";
-            std::ifstream input(path, std::ios::binary | std::ios::ate);
-            if (!input) {
-                log::warn("Consolas is unavailable; panels use ImGui's built-in face");
-                return;
-            }
-            const auto size = input.tellg();
-            if (size <= 0 || size > 16 * 1024 * 1024) return;
-            bytes.resize(static_cast<std::size_t>(size));
-            input.seekg(0);
-            if (!input.read(bytes.data(), static_cast<std::streamsize>(bytes.size()))) bytes.clear();
-        } catch (...) {
-            defaultFaceBytes().clear();
-        }
     }
 
     api::framework::ImGuiBuild hostBuild() noexcept { return RPSUI_IMGUI_BUILD(); }
@@ -180,7 +183,8 @@ namespace rpsui::render::panel_imgui
             frame.contextGeneration = panel->contextGeneration;
             frame.d3dDevice = device;
             frame.imgui = imgui_host::currentBinding();
-            frame.defaultFont = panel->defaultFont;
+            frame.theme = &panel->theme->theme;
+            for (std::size_t role = 0; role < panel->fonts.size(); ++role) frame.fonts[role] = panel->fonts[role];
             frame.pixelWidth = pixelWidth;
             frame.pixelHeight = pixelHeight;
             frame.layoutWidth = fed.layoutWidth;

@@ -121,10 +121,73 @@ namespace rpsui::api::framework
         void* allocUserData{ nullptr };
     };
 
+    // A colour: straight alpha, each channel 0 to 1, as ImGui's ImVec4.
+    struct ThemeColor
+    {
+        float r{ 0.0f };
+        float g{ 0.0f };
+        float b{ 0.0f };
+        float a{ 1.0f };
+    };
+
+    /*
+     * The player's theme: RPS_UI.toml names it and Themes\<name>.toml holds
+     * it. Before a panel's setup callback the host sets the context's ImGui
+     * style from it and adds its four faces, so plain ImGui widgets follow it.
+     * A consumer draws its own shapes with these roles rather than fixed
+     * colours. Sizes are in layout units.
+     */
+    struct Theme
+    {
+        std::uint32_t size{ sizeof(Theme) };
+        std::uint32_t version{ kRecordVersion };
+        // Changes with every theme change. The host then rebuilds every
+        // panel's context, so setup callbacks run again with the new theme.
+        std::uint64_t revision{ 0 };
+        char name[64]{};
+        ThemeColor background{};   // A panel's body
+        ThemeColor surface{};      // Idle controls, headers and rails
+        ThemeColor hover{};        // Under the pointer
+        ThemeColor pressed{};      // While pressed or dragged
+        ThemeColor selected{};     // The open page, the current choice
+        ThemeColor border{};       // Control outlines
+        ThemeColor divider{};      // Rules and separators
+        ThemeColor text{};
+        ThemeColor textMuted{};    // Help, units and secondary text
+        ThemeColor textDisabled{};
+        ThemeColor accent{};       // Solid fills of chosen things, links, the cursor
+        ThemeColor onAccent{};     // Text and marks on an accent fill
+        ThemeColor focus{};        // The control the stick adjusts
+        ThemeColor pending{};      // Changed and not yet saved
+        ThemeColor invalid{};      // Refused values and errors
+        ThemeColor success{};
+        ThemeColor scrim{};        // Behind a modal
+        float fontSize{ 20.0f };      // Body text
+        float titleFontSize{ 27.0f };
+        float smallFontSize{ 17.0f }; // Nothing smaller is drawn
+        float targetHeight{ 40.0f };  // Anything pressable is at least this tall
+        float padding{ 10.0f };
+        float spacing{ 8.0f };
+        float rounding{ 0.0f };
+        float borderWidth{ 1.0f };
+    };
+
+    // The theme's faces, indexes into PanelSetup::fonts and PanelDrawFrame::fonts.
+    enum class FontRole : std::uint32_t
+    {
+        Interface = 0, // Labels and controls; io.FontDefault
+        Strong = 1,    // Headings and emphasis
+        Mono = 2,      // Numbers, code and console text
+        Prose = 3,     // Long reading text: dialogue, descriptions
+    };
+    inline constexpr std::uint32_t kFontRoleCount = 4;
+
     // Once per context, before its first frame: on registration, after a device
-    // change and after the host rebuilt the context. Add fonts, set the style
-    // and create textures here. Everything made in the context belongs to it
-    // and ends with it; contextGeneration tells the consumer when that happened.
+    // change, after a theme change and after the host rebuilt the context. The
+    // theme's style and faces are already in place; add your own fonts, adjust
+    // the style and create textures here. Everything made in the context
+    // belongs to it and ends with it; contextGeneration tells the consumer when
+    // that happened.
     struct PanelSetup
     {
         std::uint32_t size{ sizeof(PanelSetup) };
@@ -134,7 +197,8 @@ namespace rpsui::api::framework
         std::uint64_t contextGeneration{ 0 };
         void* d3dDevice{ nullptr };    // ID3D11Device*, for the consumer's own textures
         ImGuiBinding imgui{};
-        void* defaultFont{ nullptr };  // ImFont*: the host's text face, also io.FontDefault
+        const Theme* theme{ nullptr }; // Valid for the callback
+        void* fonts[kFontRoleCount]{}; // ImFont* by FontRole, valid for the context
     };
 
     /*
@@ -156,7 +220,8 @@ namespace rpsui::api::framework
         std::uint64_t contextGeneration{ 0 };
         void* d3dDevice{ nullptr };    // ID3D11Device*, for the consumer's own textures
         ImGuiBinding imgui{};
-        void* defaultFont{ nullptr };  // ImFont*
+        const Theme* theme{ nullptr }; // Valid for the callback
+        void* fonts[kFontRoleCount]{}; // ImFont* by FontRole
         std::uint32_t pixelWidth{ 0 };
         std::uint32_t pixelHeight{ 0 };
         float layoutWidth{ 0.0f };
@@ -252,8 +317,10 @@ namespace rpsui::api::framework
     static_assert(std::is_standard_layout_v<PanelPose> && sizeof(PanelPose) == 56);
     static_assert(std::is_standard_layout_v<ImGuiBuild> && sizeof(ImGuiBuild) == 56);
     static_assert(std::is_standard_layout_v<ImGuiBinding> && sizeof(ImGuiBinding) == 32);
-    static_assert(std::is_standard_layout_v<PanelSetup> && sizeof(PanelSetup) == 80);
-    static_assert(std::is_standard_layout_v<PanelDrawFrame> && sizeof(PanelDrawFrame) == 152);
+    static_assert(std::is_standard_layout_v<ThemeColor> && sizeof(ThemeColor) == 16);
+    static_assert(std::is_standard_layout_v<Theme> && sizeof(Theme) == 384);
+    static_assert(std::is_standard_layout_v<PanelSetup> && sizeof(PanelSetup) == 112);
+    static_assert(std::is_standard_layout_v<PanelDrawFrame> && sizeof(PanelDrawFrame) == 184);
     static_assert(std::is_standard_layout_v<PanelRegistration> && sizeof(PanelRegistration) == 280);
     static_assert(std::is_standard_layout_v<PanelPresentation> && sizeof(PanelPresentation) == 80);
     static_assert(std::is_standard_layout_v<PanelState> && sizeof(PanelState) == 88);

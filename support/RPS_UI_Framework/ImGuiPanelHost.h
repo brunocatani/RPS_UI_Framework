@@ -1,7 +1,8 @@
 #pragma once
 
 // How RPS UI Framework runs a panel's Dear ImGui frame, for the host itself and
-// for a consumer's desktop preview or test that stands in for the host.
+// for a consumer's desktop preview or test that stands in for the host: context
+// settings, the theme as ImGui style, the theme's faces, input and the frame.
 //
 // This is not part of the runtime API in include/: it includes Dear ImGui and
 // its DX11 backend, so only code that compiles Dear ImGui with the shared
@@ -11,6 +12,8 @@
 
 #include <RPS_UI_Framework/Framework.h>
 #include <RPS_UI_Framework/ImGuiBuild.h>
+#include <RPS_UI_Framework/ThemeDefaults.h>
+#include <RPS_UI_Framework/ThemeStyle.h>
 
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
@@ -19,6 +22,7 @@
 #include <d3d11.h>
 
 #include <algorithm>
+#include <array>
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
@@ -27,9 +31,6 @@
 
 namespace rpsui::imgui_host
 {
-    // The default face's size. ImGui's own default is sized for a desktop
-    // monitor; a panel is read at arm's length.
-    inline constexpr float kDefaultFontSize = 20.0f;
     // Scroll axes arrive in stick deflection; ImGui wants wheel units.
     inline constexpr float kWheelUnitsPerSecond = 5.5f;
 
@@ -90,26 +91,37 @@ namespace rpsui::imgui_host
         io.ConfigErrorRecoveryEnableDebugLog = false;
         io.ConfigErrorRecoveryEnableTooltip = false;
         // style.FontSizeBase stays unset: the first frame takes io.FontDefault's
-        // size, so a consumer that installs its own default font in its setup
-        // callback gets that font's size.
+        // size, the theme's body size unless a consumer's setup callback
+        // installs another default font.
     }
 
-    // The default text face from face bytes the caller keeps alive for the
-    // atlas's lifetime; ImGui's built-in face when there are none.
-    [[nodiscard]] inline ImFont* addDefaultFont(std::span<const char> faceBytes)
+    // Face bytes by FontRole, kept alive by the caller for the atlas's lifetime.
+    using FaceSet = std::array<std::span<const char>, api::framework::kFontRoleCount>;
+    using FontSet = std::array<ImFont*, api::framework::kFontRoleCount>;
+
+    // The theme's faces at its body size; ImGui renders each at any size.
+    // A missing face falls back to the Interface face, and that to ImGui's own.
+    [[nodiscard]] inline FontSet addThemeFonts(const api::framework::Theme& theme, const FaceSet& faces)
     {
         auto& io = ImGui::GetIO();
-        ImFontConfig config{};
-        config.SizePixels = kDefaultFontSize;
-        ImFont* font = nullptr;
-        if (!faceBytes.empty()) {
+        FontSet fonts{};
+        for (std::size_t role = 0; role < fonts.size(); ++role) {
+            if (faces[role].empty()) continue;
+            ImFontConfig config{};
             config.FontDataOwnedByAtlas = false;
-            font = io.Fonts->AddFontFromMemoryTTF(const_cast<char*>(faceBytes.data()),
-                static_cast<int>(faceBytes.size()), kDefaultFontSize, &config);
+            fonts[role] = io.Fonts->AddFontFromMemoryTTF(const_cast<char*>(faces[role].data()),
+                static_cast<int>(faces[role].size()), theme.fontSize, &config);
         }
-        if (!font) font = io.Fonts->AddFontDefaultVector(&config);
-        io.FontDefault = font;
-        return font;
+        auto& interfaceFont = fonts[static_cast<std::size_t>(api::framework::FontRole::Interface)];
+        if (!interfaceFont) {
+            ImFontConfig config{};
+            config.SizePixels = theme.fontSize;
+            interfaceFont = io.Fonts->AddFontDefaultVector(&config);
+        }
+        for (auto& font : fonts)
+            if (!font) font = interfaceFont;
+        io.FontDefault = interfaceFont;
+        return fonts;
     }
 
     // Feeds one frame's display and input to the current context. Call before
@@ -172,15 +184,18 @@ namespace rpsui::imgui_host
     class LocalPanelHost
     {
     public:
+        // faces are by FontRole and stay alive for the host's lifetime; an
+        // empty face falls back as in the game.
         LocalPanelHost(ID3D11Device* device, ID3D11DeviceContext* context, const api::framework::PanelRegistration& panel,
-            std::span<const char> defaultFaceBytes) :
-            device_(device), context_(context), panel_(panel)
+            const FaceSet& faces = {}, const api::framework::Theme& theme = theme_defaults::robco()) :
+            device_(device), context_(context), panel_(panel), theme_(theme)
         {
             imgui_ = ImGui::CreateContext();
             if (!imgui_) throw std::runtime_error("ImGui context creation failed");
             ImGui::SetCurrentContext(imgui_);
             configureContext();
-            defaultFont_ = addDefaultFont(defaultFaceBytes);
+            applyTheme(theme_);
+            fonts_ = addThemeFonts(theme_, faces);
             if (!ImGui_ImplDX11_Init(device_, context_)) {
                 ImGui::DestroyContext(imgui_);
                 throw std::runtime_error("ImGui DX11 renderer initialization failed");
@@ -192,7 +207,8 @@ namespace rpsui::imgui_host
                 setup.contextGeneration = 1;
                 setup.d3dDevice = device_;
                 setup.imgui = currentBinding();
-                setup.defaultFont = defaultFont_;
+                setup.theme = &theme_;
+                for (std::size_t role = 0; role < fonts_.size(); ++role) setup.fonts[role] = fonts_[role];
                 panel_.setupCallback(&setup, panel_.userData);
                 ImGui::SetCurrentContext(imgui_);
             }
@@ -229,7 +245,8 @@ namespace rpsui::imgui_host
             frame.contextGeneration = 1;
             frame.d3dDevice = device_;
             frame.imgui = currentBinding();
-            frame.defaultFont = defaultFont_;
+            frame.theme = &theme_;
+            for (std::size_t role = 0; role < fonts_.size(); ++role) frame.fonts[role] = fonts_[role];
             frame.pixelWidth = input.pixelWidth;
             frame.pixelHeight = input.pixelHeight;
             frame.layoutWidth = fed.layoutWidth;
@@ -254,8 +271,9 @@ namespace rpsui::imgui_host
         ID3D11Device* device_{ nullptr };
         ID3D11DeviceContext* context_{ nullptr };
         api::framework::PanelRegistration panel_{};
+        api::framework::Theme theme_{};
         ImGuiContext* imgui_{ nullptr };
-        ImFont* defaultFont_{ nullptr };
+        FontSet fonts_{};
         std::uint64_t sequence_{ 0 };
     };
 }

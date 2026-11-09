@@ -9,6 +9,12 @@ It works alongside [Mods Config FO4 VR](https://github.com/ArthurHub/F4VR-Mods-C
 while that menu is open, the controllers belong to it and RPS UI panels take no
 input until it closes.
 
+## Settings and themes
+
+`Documents\My Games\Fallout4VR\Mods_Config\RPS_UI_Framework\RPS_UI.toml` holds the
+panels' sharpness and the theme every mod's panels draw with. Themes are files you
+can copy, edit and share; see [Themes](docs/Themes.md).
+
 ## For developers
 
 The public UI API headers are in this repository's [include/](include/RPS_UI_Framework/),

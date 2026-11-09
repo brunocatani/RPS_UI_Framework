@@ -5,9 +5,9 @@ Shared world-space UI and VR controller interaction for Fallout 4 VR. It hosts w
 ## Layout
 
 - `include/RPS_UI_Framework/`: the public API, the only copy of these headers. They include only the C++ standard library and each other.
-- `support/RPS_UI_Framework/ImGuiPanelHost.h`: how a panel's Dear ImGui frame runs, shared by the host and by consumers' desktop previews and tests. It includes Dear ImGui, so it stays out of `include/`.
-- `docs/api/`: one page per interface, starting at `Overview.md`.
-- `src/`: the plugin. `Api.cpp` holds the tables, discovery and retired exports. `FrameworkRuntime.cpp` hosts panels, `render/PanelImGui.cpp` owns their Dear ImGui contexts and `InputService.cpp` publishes input. `WorldDrawStore.cpp` owns world drawing.
+- `support/RPS_UI_Framework/`: code shared by the host and consumers' desktop previews and tests, kept out of `include/` because it is not runtime API. `ImGuiPanelHost.h` runs a panel's Dear ImGui frame, `ThemeStyle.h` turns a theme into ImGui's style (both include Dear ImGui), and `ThemeDefaults.h` holds the built-in RobCo theme (standard library only).
+- `docs/api/`: one page per interface, starting at `Overview.md`. `docs/Themes.md` is the players' and theme makers' guide.
+- `src/`: the plugin. `Api.cpp` holds the tables, discovery and retired exports. `FrameworkRuntime.cpp` hosts panels, `render/PanelImGui.cpp` owns their Dear ImGui contexts and `InputService.cpp` publishes input. `UiSettings.cpp` reads `RPS_UI.toml` and `ThemeStore.cpp` the theme files, on a watcher thread that publishes immutable snapshots. `WorldDrawStore.cpp` owns world drawing.
 - `tests/`: targeted tests. `ConsumerExample.cpp` is the minimal consumer, compiled with the public header test.
 
 ## Build and tests
@@ -19,7 +19,7 @@ Requires Windows x64, Visual Studio 2022, CMake, vcpkg with `VCPKG_ROOT` set, an
 
 ## Runtime files
 
-The plugin is `F4SE/Plugins/RPS_UI_Framework.dll`, deployed under the mod folder set by `COPY_PLUGIN_BASE_PATH` in `CMakeUserPresets.json`. It logs to `RPS_UI_Framework.log` in the game's F4SE log folder.
+The plugin is `F4SE/Plugins/RPS_UI_Framework.dll`, deployed under the mod folder set by `COPY_PLUGIN_BASE_PATH` in `CMakeUserPresets.json`. It logs to `RPS_UI_Framework.log` in the game's F4SE log folder. Its settings are `RPS_UI.toml` in `Mods_Config\RPS_UI_Framework` under the player's Documents game folder, with themes in `Themes\` and theme fonts in `Fonts\` beside it.
 
 ## What it does not own
 
@@ -35,4 +35,4 @@ Menus, settings pages and their persistence belong to the mods that show them. R
 - Input yields while Mods Config FO4 VR's menu is open (`src/ModsConfigMenu.cpp`, read through its public `getMenuState`). Both mods hide controller buttons from every other reader of the shared IVRSystem vtable, so only one of them may take input at a time. Its hooks of the same call sites (main tick, scene-depth commit, controller polls, window procedure) chain with ours in either load order; keep every hook here chaining onto a foreign detour rather than refusing it.
 - Keyboard capture (`src/KeyboardCapture.cpp`) changes no engine state: it withholds raw key presses and `WM_CHAR` from the game window while held. Key releases always pass, or a key would stay held in the game's key table.
 - Screen-positioned drawing does not exist. World drawing is anchored to world points, and text is projected per eye.
-- The host owns every panel's Dear ImGui context, renderer, input feeding and frame; a consumer never receives a render target or device context. A consumer's Dear ImGui build must match the host's (`ImGuiBuild.h`), or its panel is refused and the game stops at the main menu.
+- The host owns every panel's Dear ImGui context, renderer, input feeding, frame, texture resolution and theme; a consumer never receives a render target or device context, and declares only its layout size. A consumer's Dear ImGui build must match the host's (`ImGuiBuild.h`), or its panel is refused and the game stops at the main menu.

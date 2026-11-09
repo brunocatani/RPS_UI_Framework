@@ -75,7 +75,7 @@ void RPSUI_CALL draw(const rpsui::api::framework::PanelDrawFrame* frame, void* u
 }
 ```
 
-`setupCallback` receives a `PanelSetup` once per context, before its first frame: on the panel's first draw, after a device change, and after the host rebuilt a context whose draw failed. Add fonts, set the style and create textures there. Fonts and textures you add belong to that context; `contextGeneration` changes when it is replaced, and anything made for the old one must be made again. `defaultFont` is the host's text face (Consolas, or ImGui's built-in face when Windows has no Consolas), which is also `io.FontDefault`, at 20 pixels. `style.FontSizeBase` is left unset, so the first frame takes the size of whatever font is `io.FontDefault` then, including one your setup callback installs.
+`setupCallback` receives a `PanelSetup` once per context, before its first frame: on the panel's first draw, after a device change, after a theme change, and after the host rebuilt a context whose draw failed. The theme's style and faces are already in place (see [Themes](#themes)); add your own fonts, adjust the style and create textures there. Fonts and textures you add belong to that context; `contextGeneration` changes when it is replaced, and anything made for the old one must be made again. `style.FontSizeBase` is left unset, so the first frame takes the size of whatever font is `io.FontDefault` then: the theme's Interface face at its body size, or a font your setup callback installs.
 
 `drawCallback` receives a `PanelDrawFrame` between the host's `NewFrame` and `Render`. Before calling it, the host has set the display size, fed the pointer position, the primary button and the scroll axes, and turned the software cursor on while the pointer is valid. You may change `io.MouseDrawCursor` during the frame. The frame's coordinates are in layout units, the same as ImGui's `DisplaySize` and `MousePos`. `backDown` is the gated physical grip of the pointing hand; derive edges from it locally.
 
@@ -83,9 +83,34 @@ void RPSUI_CALL draw(const rpsui::api::framework::PanelDrawFrame* frame, void* u
 
 An ImGui context lives until the panel is unregistered or the device changes, so ImGui state such as scroll positions survives closing and reopening the panel. Unbalanced `Begin`/`End` calls are recovered without asserts.
 
+### Themes
+
+Players choose how every panel looks: `Theme` in `RPS_UI.toml` names a file in `Mods_Config\RPS_UI_Framework\Themes\`, and the built-in `RobCo` theme is written there as the template ([guide](../Themes.md)). Before your setup callback, the host sets the context's ImGui style from the theme, so plain ImGui widgets follow it without any code of yours.
+
+`PanelSetup::theme` and `PanelDrawFrame::theme` point at the `Theme` record for the callback. Draw your own shapes with its roles instead of fixed colours:
+
+| Role | Use |
+| --- | --- |
+| `background` | A panel's body |
+| `surface`, `hover`, `pressed`, `selected` | A control idle, under the pointer, while pressed, and chosen |
+| `border`, `divider` | Outlines; rules and separators |
+| `text`, `textMuted`, `textDisabled` | Text; help and secondary text; text of things that cannot be used now |
+| `accent`, `onAccent` | Solid fills of chosen things; text and marks on them |
+| `focus` | The control the thumbstick adjusts |
+| `pending`, `invalid`, `success` | A change not yet saved; a refused value or error; a finished action |
+| `scrim` | Behind a dialog |
+
+Colours have straight alpha. Sizes are in layout units: `fontSize`, `titleFontSize` and `smallFontSize` for text, `targetHeight` as the least height of anything pressable, and `padding`, `spacing`, `rounding` and `borderWidth`. Scale your own text sizes by `fontSize` when you want a player's larger body text to reach your panel.
+
+`fonts` holds the theme's four faces by `FontRole`: `Interface` (also `io.FontDefault`), `Strong`, `Mono` and `Prose`, for long reading text. Each renders at any size with `ImGui::PushFont(font, size)`.
+
+A theme change rebuilds every panel's context, so your setup callback runs again with the new theme. Keep the theme pointer only for the callback that received it.
+
+`support/RPS_UI_Framework/ThemeDefaults.h` holds the built-in theme as a `Theme` record, and `support/RPS_UI_Framework/ThemeStyle.h` holds the host's theme-to-style mapping, for previews and tests that style their own contexts the way the game does.
+
 ### Desktop previews and tests
 
-`support/RPS_UI_Framework/ImGuiPanelHost.h` is the code the host runs each panel frame with: context settings, the default font, input feeding and the frame. Its `LocalPanelHost` runs your setup and draw callbacks in a desktop preview or test exactly as the game does, with its own context and DX11 renderer. It includes Dear ImGui and its DX11 backend, so it is not part of the runtime API and only previews and tests use it; in the game, RPS UI Framework is the only host.
+`support/RPS_UI_Framework/ImGuiPanelHost.h` is the code the host runs each panel frame with: context settings, the theme's style and faces, input feeding and the frame. Its `LocalPanelHost` runs your setup and draw callbacks in a desktop preview or test exactly as the game does, with its own context and DX11 renderer. It includes Dear ImGui and its DX11 backend, so it is not part of the runtime API and only previews and tests use it; in the game, RPS UI Framework is the only host.
 
 ## Readiness
 

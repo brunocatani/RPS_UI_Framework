@@ -99,7 +99,7 @@ namespace
         require(queue.push(input::KeyboardEventKind::Key, 999), "drained keyboard queue did not reopen");
         queue.clear();
         require(queue.drain(events) == 0, "cleared keyboard queue kept keys for the next owner");
-        static_assert(offsetof(framework::PanelDrawFrame, backDown) == 146);
+        static_assert(offsetof(framework::PanelDrawFrame, backDown) == 178);
         static_assert(offsetof(framework::PanelRegistration, flags) == 192);
         static_assert(offsetof(framework::PanelRegistration, imgui) == 200);
         static_assert(offsetof(framework::PanelRegistration, drawCallback) == 264);
