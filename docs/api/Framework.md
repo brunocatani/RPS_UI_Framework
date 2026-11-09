@@ -115,6 +115,10 @@ A theme change rebuilds every panel's context, so your setup callback runs again
 
 `support/RPS_UI_Framework/ThemeDefaults.h` holds the built-in theme as a `Theme` record, and `support/RPS_UI_Framework/ThemeStyle.h` holds the host's theme-to-style mapping, for previews and tests that style their own contexts the way the game does.
 
+### Showing controller bindings
+
+Two support headers show a controller binding the same way in every mod. `BindingText.h` (standard library only) names controls the way ROCK's settings do, A and B on the right controller and X and Y on the left, reads ROCK's button-layout values with `parseControl`, and turns a `Binding` (hand, control, gesture, optional held modifier) into a sentence such as "Hold right grip" or "Double-tap left X while holding left grip". `BindingIcons.h` draws each control as a procedural icon at any size in any colour, marks the gesture (tap, double tap, hold, release) and the hand, and `chip` puts an icon beside its sentence on the theme's surface.
+
 ### Desktop previews and tests
 
 `support/RPS_UI_Framework/ImGuiPanelHost.h` is the code the host runs each panel frame with: context settings, the theme's style and faces, input feeding and the frame. Its `LocalPanelHost` runs your setup and draw callbacks in a desktop preview or test exactly as the game does, with its own context and DX11 renderer. It includes Dear ImGui and its DX11 backend, so it is not part of the runtime API and only previews and tests use it; in the game, RPS UI Framework is the only host.

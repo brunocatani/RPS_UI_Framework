@@ -212,7 +212,8 @@ if(RPS_UI_FRAMEWORK_BUILD_TESTS)
   target_compile_features(RPSUIFrameworkPolicyTests PRIVATE cxx_std_23)
   target_include_directories(RPSUIFrameworkPolicyTests PRIVATE
     "${SOURCE_DIR}"
-    "${PUBLIC_INCLUDE_DIR}")
+    "${PUBLIC_INCLUDE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/support")
   add_test(NAME RPSUIFramework.Policy
     COMMAND RPSUIFrameworkPolicyTests)
 

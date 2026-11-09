@@ -1,5 +1,6 @@
 #include "ContextualScrollPolicy.h"
 #include "GripGesture.h"
+#include <RPS_UI_Framework/BindingText.h>
 #include "PanelMovePolicy.h"
 #include "InputCapturePolicy.h"
 #include "KeyboardCapturePolicy.h"
@@ -283,6 +284,27 @@ namespace
         require(released.endMove && !released.back, "releasing a moved panel was Back");
     }
 
+    // ROCK's button-layout values, and the letters each hand's face buttons carry.
+    void testBindingText()
+    {
+        using namespace rpsui::binding;
+        require(parseControl("trigger") == Control::Trigger && parseControl("GRIP") == Control::Grip,
+            "a ROCK control value was not recognized");
+        require(parseControl("a") == Control::LowerFace && parseControl("x") == Control::LowerFace &&
+            parseControl("b") == Control::UpperFace && parseControl("y") == Control::UpperFace,
+            "a face button value mapped to the wrong button");
+        require(parseControl("thumbstick") == Control::StickClick && parseControl("pad_center") == Control::PadCenter &&
+            parseControl("none") == Control::None && !parseControl("bogus"), "a ROCK control value mapped wrongly");
+        require(controlName(Control::LowerFace, Hand::Left) == "X" && controlName(Control::LowerFace, Hand::Right) == "A" &&
+            controlName(Control::UpperFace, Hand::Left) == "Y" && controlName(Control::UpperFace, Hand::Right) == "B",
+            "a face button carries the other hand's letter");
+        const Binding chord{ .input = { Hand::Left, Control::LowerFace }, .gesture = Gesture::DoubleTap,
+            .modifier = Input{ Hand::Left, Control::Grip } };
+        const auto text = sentence(chord);
+        require(text.find("left X") != std::string::npos && text.find("left grip") != std::string::npos,
+            "a chord's sentence lost one of its inputs");
+    }
+
     void testPanelMove()
     {
         using namespace rpsui::panel_move;
@@ -336,6 +358,7 @@ int main()
         testStereoPolicy();
         testGripGesture();
         testPanelMove();
+        testBindingText();
         std::cout << "RPS UI Framework policy tests passed\n";
         return 0;
     } catch (const std::exception& error) {
