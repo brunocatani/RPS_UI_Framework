@@ -190,8 +190,8 @@ namespace rpsui::api::framework
         float maximumPhysicalWidth{ 180.0f };
         std::int32_t sortOrder{ 0 };
         std::uint32_t flags{ 0 }; // PanelFlag bits. Zero is a rectangular opaque panel.
-        // ImGui's DisplaySize. Both zero: the pixel size. Otherwise both set and
-        // with the pixel size's aspect; the host scales to the render target.
+        // ImGui's DisplaySize. Both zero: the pixel size. Otherwise both at
+        // least 64; the host scales each axis to the render target on its own.
         float layoutWidth{ 0.0f };
         float layoutHeight{ 0.0f };
         std::uint32_t reserved{ 0 };

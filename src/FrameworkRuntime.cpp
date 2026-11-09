@@ -397,14 +397,12 @@ namespace rpsui
                     registration.minimumPhysicalWidth &&
                 registration.defaultPhysicalWidth <=
                     registration.maximumPhysicalWidth;
-            // Both layout extents zero (pixel units) or both set, at the pixel aspect.
+            // Both layout extents zero (pixel units) or both set. Each axis
+            // scales on its own, so a layout may stretch onto any texture.
             const bool pixelLayout = registration.layoutWidth == 0.0f && registration.layoutHeight == 0.0f;
             const bool layoutValid = pixelLayout ||
                 (std::isfinite(registration.layoutWidth) && std::isfinite(registration.layoutHeight) &&
-                    registration.layoutWidth >= 64.0f && registration.layoutHeight >= 64.0f &&
-                    std::abs(registration.layoutWidth * static_cast<float>(registration.pixelHeight) -
-                        registration.layoutHeight * static_cast<float>(registration.pixelWidth)) <=
-                        0.01f * registration.layoutWidth * static_cast<float>(registration.pixelHeight));
+                    registration.layoutWidth >= 64.0f && registration.layoutHeight >= 64.0f);
             if (panelId.empty() ||
                 displayName.empty() ||
                 !dimensionsValid ||

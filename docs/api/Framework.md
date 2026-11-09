@@ -19,7 +19,7 @@ Registers consumers and world panels, submits panel poses and reads panel state.
 | `defaultPhysicalWidth`, `minimumPhysicalWidth`, `maximumPhysicalWidth` | World size in game units |
 | `sortOrder` | Composition order |
 | `flags` | `PanelFlag` bits; zero is a rectangular opaque panel |
-| `layoutWidth`, `layoutHeight` | ImGui's display size. Both zero uses the pixel size; otherwise set both, at the pixel size's aspect |
+| `layoutWidth`, `layoutHeight` | ImGui's display size. Both zero uses the pixel size; otherwise set both, at least 64. Each axis is scaled to the texture on its own |
 | `imgui` | Your Dear ImGui build, `RPSUI_IMGUI_BUILD()` |
 | `setupCallback` | Optional. Called once per ImGui context before its first frame |
 | `drawCallback`, `userData` | Called every frame the panel is open; keep both alive until the panel is unregistered |
