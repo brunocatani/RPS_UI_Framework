@@ -4,6 +4,7 @@
 #include "Logger.h"
 #include "render/D3D11StateGuard.h"
 #include "render/HostRenderer.h"
+#include "render/PanelImGui.h"
 #include "render/SceneDepthCapture.h"
 #include "render/StereoProjection.h"
 #include "render/WorldDrawRenderer.h"
@@ -80,6 +81,8 @@ namespace rpsui::render
 
         void releaseDeviceResources(Resources& state) noexcept
         {
+            // ImGui renderers hold device objects; they go with the device.
+            panel_imgui::releaseAll();
             state.panelGpu.clear();
             state.batch.reset();
             state.effect.reset();
@@ -855,7 +858,7 @@ namespace rpsui::render
             PanelGpu& gpu,
             float deltaSeconds) noexcept
         {
-            // Each independent consumer backend gets its own state boundary.
+            // Each panel's drawing gets its own state boundary.
             ScopedD3D11State consumerState(state.context.Get());
             auto* renderTarget = gpu.renderTarget.Get();
             state.context->OMSetRenderTargets(
@@ -879,41 +882,9 @@ namespace rpsui::render
                 renderTarget,
                 clear.data());
 
-            rpsui::api::framework::PanelRenderFrame frame{};
-            frame.panelHandle = panel.panelHandle;
-            frame.frameSequence = state.frameSequence;
-            frame.deviceGeneration = state.deviceGeneration;
-            frame.d3dDevice = state.device.Get();
-            frame.d3dContext = state.context.Get();
-            frame.renderTargetView = renderTarget;
-            frame.pixelWidth = panel.pixelWidth;
-            frame.pixelHeight = panel.pixelHeight;
-            frame.deltaSeconds = deltaSeconds;
-            frame.pointerPixelX = panel.pointerPixelX;
-            frame.pointerPixelY = panel.pointerPixelY;
-            frame.scrollAxisX = panel.scrollAxisX;
-            frame.scrollAxisY = panel.scrollAxisY;
-            frame.physicalWidth = panel.pose.physicalWidth;
-            frame.physicalHeight = panel.pose.physicalHeight;
-            frame.pointerHand = panel.pointerHand;
-            frame.hoveredResizeHandle =
-                panel.hoveredResizeHandle;
-            frame.activeResizeHandle =
-                panel.activeResizeHandle;
-            frame.pointerValid = panel.pointerValid ? 1 : 0;
-            frame.primaryDown = panel.primaryDown ? 1 : 0;
-            frame.backDown = panel.backDown ? 1 : 0;
-
-            try {
-                if (panel.numberOverlay) return renderNumberPanel(state,panel);
-                panel.renderCallback(&frame, panel.userData);
-                return true;
-            } catch (...) {
-                log::error(
-                    "UI consumer callback for panel {} threw across its boundary",
-                    panel.panelHandle);
-                return false;
-            }
+            if (panel.numberOverlay) return renderNumberPanel(state, panel);
+            return panel_imgui::drawPanel(state.device.Get(), state.context.Get(), state.deviceGeneration,
+                state.frameSequence, panel, renderTarget, deltaSeconds);
         }
     }
 
@@ -927,6 +898,8 @@ namespace rpsui::render
             state.renderMutex,
             std::try_to_lock);
         if (!renderLock.owns_lock()) return;
+        // Unregistered panels' ImGui contexts end here, on the thread that owns them.
+        panel_imgui::collectRetired();
         auto& panels = state.panels;
         FrameworkRuntime::get().snapshotRenderPanels(panels);
         // World drawing needs neither an open panel nor scene depth. Late

@@ -67,6 +67,27 @@ add_subdirectory(
   EXCLUDE_FROM_ALL)
 find_package(directxtk CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
+find_package(Freetype REQUIRED)
+
+# The host's Dear ImGui. Consumers compile the same revision with the same user
+# configuration (include/RPS_UI_Framework/ImGuiBuild.h); registerPanel compares
+# the builds. FreeType rasterizes every panel's fonts, colour emoji included.
+set(IMGUI_DIR "${WORKSPACE_ROOT}/devtools/imgui" CACHE PATH "Dear ImGui source checkout")
+if(NOT EXISTS "${IMGUI_DIR}/imgui.cpp" OR NOT EXISTS "${IMGUI_DIR}/misc/freetype/imgui_freetype.cpp")
+  message(FATAL_ERROR "Dear ImGui not found in '${IMGUI_DIR}'; set IMGUI_DIR.")
+endif()
+add_library(rpsui_imgui STATIC
+  "${IMGUI_DIR}/imgui.cpp"
+  "${IMGUI_DIR}/imgui_draw.cpp"
+  "${IMGUI_DIR}/imgui_tables.cpp"
+  "${IMGUI_DIR}/imgui_widgets.cpp"
+  "${IMGUI_DIR}/backends/imgui_impl_dx11.cpp"
+  "${IMGUI_DIR}/misc/freetype/imgui_freetype.cpp")
+target_include_directories(rpsui_imgui PUBLIC "${IMGUI_DIR}" "${IMGUI_DIR}/backends" "${PUBLIC_INCLUDE_DIR}")
+target_compile_features(rpsui_imgui PUBLIC cxx_std_23)
+target_compile_definitions(rpsui_imgui PUBLIC
+  NOMINMAX WIN32_LEAN_AND_MEAN IMGUI_USER_CONFIG="RPS_UI_Framework/ImGuiBuild.h" IMGUI_ENABLE_FREETYPE)
+target_link_libraries(rpsui_imgui PUBLIC Freetype::Freetype d3d11.lib dxgi.lib d3dcompiler.lib)
 
 file(GLOB_RECURSE headers CONFIGURE_DEPENDS
   "${SOURCE_DIR}/*.h"
@@ -88,6 +109,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
   "${RPS_FRAMEWORK_INCLUDE_DIR}")
 target_link_libraries(${PROJECT_NAME} PRIVATE
   F4VRCommon::framework
+  rpsui_imgui
   Microsoft::DirectXTK
   spdlog::spdlog
   d3d11.lib dxgi.lib d3dcompiler.lib shell32.lib version.lib bcrypt.lib gdi32.lib user32.lib)
@@ -140,11 +162,11 @@ if(RPS_UI_FRAMEWORK_BUILD_TESTS)
   add_test(NAME RPSUIFramework.GraphicsStateCommit COMMAND RPSUIGraphicsStateCommitTests)
   # Exercise actual exported tables, registries and input subscriptions. The
   # test never installs native hooks; scene-depth demand is stubbed.
-  add_executable(RPSUIRegistryTests tests/RegistryTests.cpp src/FrameworkRuntime.cpp src/Api.cpp src/WorldDrawStore.cpp src/RequiredUpdates.cpp src/KeyboardCapture.cpp)
+  add_executable(RPSUIRegistryTests tests/RegistryTests.cpp src/FrameworkRuntime.cpp src/Api.cpp src/WorldDrawStore.cpp src/RequiredUpdates.cpp src/KeyboardCapture.cpp src/render/PanelImGui.cpp)
   target_compile_features(RPSUIRegistryTests PRIVATE cxx_std_23)
   target_compile_definitions(RPSUIRegistryTests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX NOMMNOSOUND)
   target_include_directories(RPSUIRegistryTests PRIVATE "${SOURCE_DIR}" "${PUBLIC_INCLUDE_DIR}" "${RPS_FRAMEWORK_INCLUDE_DIR}")
-  target_link_libraries(RPSUIRegistryTests PRIVATE F4VRCommon::framework spdlog::spdlog)
+  target_link_libraries(RPSUIRegistryTests PRIVATE F4VRCommon::framework spdlog::spdlog rpsui_imgui)
   # No test calls OpenVR; defer its import so validation needs no game DLLs.
   target_link_libraries(RPSUIRegistryTests PRIVATE delayimp)
   target_link_options(RPSUIRegistryTests PRIVATE /DELAYLOAD:openvr_api.dll)

@@ -1,10 +1,10 @@
 # RPS UI Framework API
 
-RPS UI Framework publishes eight interfaces from `include/RPS_UI_Framework/`. The headers include only the C++ standard library and each other. They contain no CommonLibF4VR, F4SE or engine types.
+RPS UI Framework publishes eight interfaces from `include/RPS_UI_Framework/`. The headers include only the C++ standard library and each other. They contain no CommonLibF4VR, F4SE or engine types. `ImGuiBuild.h` holds the Dear ImGui configuration panel consumers build with and two macros that expand to Dear ImGui calls in your own code; see [Drawing](Framework.md#drawing).
 
 | Interface | Header | Purpose | Page |
 | --- | --- | --- | --- |
-| Framework | `Framework.h` | Consumers, world panels, poses and panel state | [Framework](Framework.md) |
+| Framework | `Framework.h` | Consumers, world panels drawn with Dear ImGui, poses and panel state | [Framework](Framework.md) |
 | Cooperation | `Cooperation.h` | Render-resource agreements, the host directory, safe retirement | [Cooperation](Cooperation.md) |
 | Focused panels | `FocusedPanel.h` | Fixed-size panels that take input only while pointed at | [FocusedPanel](FocusedPanel.md) |
 | Passive panels | `PassivePanel.h` | Visual-only panels | [PassivePanel](PassivePanel.md) |

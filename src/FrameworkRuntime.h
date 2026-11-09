@@ -36,11 +36,14 @@ namespace rpsui
     struct RenderPanelSnapshot
     {
         std::uint64_t panelHandle{ 0 };
-        rpsui::api::framework::PanelRenderCallback renderCallback{ nullptr };
+        rpsui::api::framework::PanelSetupCallback setupCallback{ nullptr };
+        rpsui::api::framework::PanelDrawCallback drawCallback{ nullptr };
         void* userData{ nullptr };
         std::shared_ptr<PanelCallbackGate> callbackGate;
         std::uint32_t pixelWidth{ 0 };
         std::uint32_t pixelHeight{ 0 };
+        float layoutWidth{ 0.0f };
+        float layoutHeight{ 0.0f };
         std::int32_t sortOrder{ 0 };
         std::uint32_t flags{ 0 };
         bool numberOverlay{};
@@ -196,7 +199,10 @@ namespace rpsui
             std::uint32_t number{};
             float numberOpacity{0.55f};
             NumberOverlayLook numberLook{};
-            rpsui::api::framework::PanelRenderCallback renderCallback{ nullptr };
+            float layoutWidth{ 0.0f };
+            float layoutHeight{ 0.0f };
+            rpsui::api::framework::PanelSetupCallback setupCallback{ nullptr };
+            rpsui::api::framework::PanelDrawCallback drawCallback{ nullptr };
             void* userData{ nullptr };
             std::shared_ptr<PanelCallbackGate> callbackGate;
             rpsui::api::framework::PanelPose pose{};

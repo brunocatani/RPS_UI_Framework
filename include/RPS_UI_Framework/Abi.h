@@ -30,6 +30,8 @@ namespace rpsui::api
         UnsupportedStage = 12,
         CallbackBusy = 13,
         PanelClosing = 14,
+        // The consumer's Dear ImGui build differs from the host's (framework::ImGuiBuild).
+        ImGuiBuildMismatch = 15,
         // Discovery.
         UnknownInterface = 100,
         UnsupportedMajor = 101,

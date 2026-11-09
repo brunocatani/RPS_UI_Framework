@@ -5,6 +5,7 @@
   "dependencies": [
     "args",
     "directxtk",
+    "freetype",
     "rapidcsv",
     "rsm-mmio",
     "spdlog",

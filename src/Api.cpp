@@ -44,6 +44,18 @@ namespace
         return rpsui::FrameworkRuntime::get().unregisterConsumer(ownerToken);
     }
 
+    // A refused Dear ImGui build stops the game like an outdated consumer.
+    Result notePanelRegistration(Result result, const framework::PanelRegistration& registration,
+        const void* callerAddress) noexcept
+    {
+        if (result == Result::ImGuiBuildMismatch) {
+            char panelId[sizeof(registration.panelId) + 1]{};
+            std::memcpy(panelId, registration.panelId, sizeof(registration.panelId));
+            rpsui::required_updates::noteImGuiBuildMismatch(panelId, callerAddress);
+        }
+        return result;
+    }
+
     Result RPSUI_CALL registerPanel(
         std::uint64_t ownerToken,
         const framework::PanelRegistration* registration,
@@ -52,10 +64,10 @@ namespace
         if (!registration || !outPanelHandle) {
             return Result::InvalidArgument;
         }
-        return rpsui::FrameworkRuntime::get().registerPanel(
+        return notePanelRegistration(rpsui::FrameworkRuntime::get().registerPanel(
             ownerToken,
             *registration,
-            *outPanelHandle);
+            *outPanelHandle), *registration, _ReturnAddress());
     }
 
     Result RPSUI_CALL unregisterPanel(
@@ -121,7 +133,8 @@ namespace
         if (!agreement || agreement->size < sizeof(cooperation::PanelAgreement)) return Result::InvalidArgument;
         if (agreement->version != kRecordVersion) return Result::VersionMismatch;
         if (!registration) { *agreement = {}; return Result::InvalidArgument; }
-        return rpsui::FrameworkRuntime::get().registerCooperativePanel(owner, *registration, *agreement);
+        return notePanelRegistration(rpsui::FrameworkRuntime::get().registerCooperativePanel(owner, *registration,
+            *agreement), registration->panel, _ReturnAddress());
     }
     Result RPSUI_CALL getCooperationSnapshot(cooperation::Snapshot* snapshot) noexcept
     {
@@ -164,14 +177,16 @@ namespace
         const framework::PanelRegistration* registration, std::uint64_t* handle) noexcept
     {
         if (!registration || !handle) return Result::InvalidArgument;
-        return rpsui::FrameworkRuntime::get().registerPassivePanel(owner, *registration, *handle);
+        return notePanelRegistration(rpsui::FrameworkRuntime::get().registerPassivePanel(owner, *registration, *handle),
+            *registration, _ReturnAddress());
     }
     const passive_panel::Api g_passive{.registerPanel = &registerPassivePanel};
     Result RPSUI_CALL registerFocusedPanel(std::uint64_t owner,
         const framework::PanelRegistration* registration, std::uint64_t* handle) noexcept
     {
         if (!registration || !handle) return Result::InvalidArgument;
-        return rpsui::FrameworkRuntime::get().registerFocusedPanel(owner, *registration, *handle);
+        return notePanelRegistration(rpsui::FrameworkRuntime::get().registerFocusedPanel(owner, *registration, *handle),
+            *registration, _ReturnAddress());
     }
     const focused_panel::Api g_focused{.registerPanel = &registerFocusedPanel};
     Result RPSUI_CALL submitWorldDraw(std::uint64_t owner, const world_draw::Publication* publication) noexcept

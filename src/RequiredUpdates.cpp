@@ -102,6 +102,21 @@ namespace rpsui::required_updates
         } catch (...) {}
     }
 
+    void noteImGuiBuildMismatch(const char* panelId, const void* callerAddress) noexcept
+    {
+        if (!required_update::firstFromCaller(callerAddress))
+            return;
+        try {
+            const auto caller = identify(callerAddress);
+            log::critical("{} registered panel '{}' with a Dear ImGui build that differs from RPS UI Framework's: it "
+                          "was built for another RPS UI Framework. The game stops at the main menu until it is updated "
+                          "or removed.",
+                caller.dllForLog, panelId ? panelId : "");
+            required_update::report(caller.dll +
+                L" was built for another RPS UI Framework and does not work with the installed one. Update it or remove it.");
+        } catch (...) {}
+    }
+
     void watch() noexcept
     {
         if (!required_update::watchMainMenu(L"RPS UI Framework: update required", &flushLog)) {

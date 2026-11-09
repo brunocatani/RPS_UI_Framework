@@ -39,7 +39,7 @@ foreach ($token in @(
 
 foreach ($token in @(
     'snapshotRenderPanels(',
-    'PanelRenderFrame',
+    'panel_imgui::drawPanel(',
     'renderConsumerPanel(',
     'drawWorldPanel(',
     'AcquireForSubmittedTarget',
@@ -52,8 +52,10 @@ foreach ($token in @(
 if (-not $runtimeHeader.Contains('RenderPanelBatch')) {
     throw 'The render path no longer uses its fixed-capacity panel snapshot.'
 }
-if ($renderer -match 'imgui|ImGui') {
-    throw 'The framework host must not own a consumer ImGui context.'
+# The host owns every panel's ImGui renderer; a consumer never receives a render target.
+$frameworkHeader = Get-Content -Raw (Join-Path $root 'include/RPS_UI_Framework/Framework.h')
+if ($frameworkHeader -match 'renderTargetView|d3dContext') {
+    throw 'A panel consumer was given the render target or device context; the host renders panels.'
 }
 
 if (-not $hooks.Contains('roll back a failed stereo-hook transaction')) {

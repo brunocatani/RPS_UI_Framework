@@ -77,21 +77,90 @@ namespace rpsui::api::framework
         float physicalHeight{ 70.3125f };
     };
 
-    struct PanelRenderFrame
+    /*
+     * RPS UI draws every panel with Dear ImGui. The host owns the panel's
+     * context, its DX11 renderer, font atlas, input and frame: it feeds the
+     * pointer, begins the frame, calls the consumer's draw callback and renders
+     * the result. The consumer only issues ImGui calls, from its own copy of
+     * Dear ImGui built as RPS_UI_Framework/ImGuiBuild.h describes.
+     */
+
+    // The consumer's Dear ImGui build (RPSUI_IMGUI_BUILD()). registerPanel
+    // refuses a panel whose build differs from the host's.
+    struct ImGuiBuild
     {
-        std::uint32_t size{ sizeof(PanelRenderFrame) };
+        std::uint32_t size{ sizeof(ImGuiBuild) };
+        std::uint32_t version{ kRecordVersion };
+        std::uint32_t versionNum{ 0 };
+        std::uint32_t wcharSize{ 0 };
+        std::uint32_t ioSize{ 0 };
+        std::uint32_t styleSize{ 0 };
+        std::uint32_t contextSize{ 0 };
+        std::uint32_t drawListSize{ 0 };
+        std::uint32_t fontAtlasSize{ 0 };
+        std::uint32_t fontSize{ 0 };
+        std::uint32_t textureDataSize{ 0 };
+        std::uint32_t drawVertSize{ 0 };
+        std::uint32_t drawIdxSize{ 0 };
+        std::uint32_t reserved{ 0 };
+    };
+
+    // Dear ImGui's allocator signatures (ImGuiMemAllocFunc, ImGuiMemFreeFunc).
+    using ImGuiAllocFunction = void* (*)(std::size_t size, void* userData);
+    using ImGuiFreeFunction = void (*)(void* pointer, void* userData);
+
+    // The host's context and allocator. Bind both with RPSUI_IMGUI_BIND before
+    // any ImGui call; they are valid only for the callback that received them.
+    struct ImGuiBinding
+    {
+        void* context{ nullptr };      // ImGuiContext*
+        ImGuiAllocFunction alloc{ nullptr };
+        ImGuiFreeFunction free{ nullptr };
+        void* allocUserData{ nullptr };
+    };
+
+    // Once per context, before its first frame: on registration, after a device
+    // change and after the host rebuilt the context. Add fonts, set the style
+    // and create textures here. Everything made in the context belongs to it
+    // and ends with it; contextGeneration tells the consumer when that happened.
+    struct PanelSetup
+    {
+        std::uint32_t size{ sizeof(PanelSetup) };
+        std::uint32_t version{ kRecordVersion };
+        std::uint64_t panelHandle{ 0 };
+        std::uint64_t deviceGeneration{ 0 };
+        std::uint64_t contextGeneration{ 0 };
+        void* d3dDevice{ nullptr };    // ID3D11Device*, for the consumer's own textures
+        ImGuiBinding imgui{};
+        void* defaultFont{ nullptr };  // ImFont*: the host's text face, also io.FontDefault
+    };
+
+    /*
+     * One frame, between the host's NewFrame and Render. Coordinates are in
+     * layout units (the registration's layout size, or pixels when it has
+     * none), the same units as ImGui's DisplaySize and MousePos. The host has
+     * already fed the pointer position, the primary button and the scroll axes
+     * to ImGui and turned the software cursor on while the pointer is valid; a
+     * consumer may change io.MouseDrawCursor during the frame.
+     */
+    struct PanelDrawFrame
+    {
+        std::uint32_t size{ sizeof(PanelDrawFrame) };
         std::uint32_t version{ kRecordVersion };
         std::uint64_t panelHandle{ 0 };
         std::uint64_t frameSequence{ 0 };
         std::uint64_t deviceGeneration{ 0 };
-        void* d3dDevice{ nullptr };
-        void* d3dContext{ nullptr };
-        void* renderTargetView{ nullptr };
+        std::uint64_t contextGeneration{ 0 };
+        void* d3dDevice{ nullptr };    // ID3D11Device*, for the consumer's own textures
+        ImGuiBinding imgui{};
+        void* defaultFont{ nullptr };  // ImFont*
         std::uint32_t pixelWidth{ 0 };
         std::uint32_t pixelHeight{ 0 };
+        float layoutWidth{ 0.0f };
+        float layoutHeight{ 0.0f };
         float deltaSeconds{ 0.0f };
-        float pointerPixelX{ 0.0f };
-        float pointerPixelY{ 0.0f };
+        float pointerX{ 0.0f };
+        float pointerY{ 0.0f };
         float scrollAxisX{ 0.0f };
         float scrollAxisY{ 0.0f };
         float physicalWidth{ 0.0f };
@@ -102,10 +171,11 @@ namespace rpsui::api::framework
         std::uint8_t pointerValid{ 0 };
         std::uint8_t primaryDown{ 0 };
         std::uint8_t backDown{ 0 }; // Gated physical grip of the pointing hand; derive edges locally.
-        std::uint8_t reservedBytes[5]{};
+        std::uint8_t reservedBytes[1]{};
     };
 
-    using PanelRenderCallback = void(RPSUI_CALL*)(const PanelRenderFrame* frame, void* userData) noexcept;
+    using PanelSetupCallback = void(RPSUI_CALL*)(const PanelSetup* setup, void* userData) noexcept;
+    using PanelDrawCallback = void(RPSUI_CALL*)(const PanelDrawFrame* frame, void* userData) noexcept;
 
     struct PanelRegistration
     {
@@ -120,8 +190,14 @@ namespace rpsui::api::framework
         float maximumPhysicalWidth{ 180.0f };
         std::int32_t sortOrder{ 0 };
         std::uint32_t flags{ 0 }; // PanelFlag bits. Zero is a rectangular opaque panel.
+        // ImGui's DisplaySize. Both zero: the pixel size. Otherwise both set and
+        // with the pixel size's aspect; the host scales to the render target.
+        float layoutWidth{ 0.0f };
+        float layoutHeight{ 0.0f };
         std::uint32_t reserved{ 0 };
-        PanelRenderCallback renderCallback{ nullptr };
+        ImGuiBuild imgui{};
+        PanelSetupCallback setupCallback{ nullptr }; // Optional.
+        PanelDrawCallback drawCallback{ nullptr };
         void* userData{ nullptr };
     };
 
@@ -171,8 +247,11 @@ namespace rpsui::api::framework
     static_assert(std::is_standard_layout_v<ConsumerRegistration> && sizeof(ConsumerRegistration) == 168);
     static_assert(std::is_standard_layout_v<ConsumerHandle> && sizeof(ConsumerHandle) == 16);
     static_assert(std::is_standard_layout_v<PanelPose> && sizeof(PanelPose) == 56);
-    static_assert(std::is_standard_layout_v<PanelRenderFrame> && sizeof(PanelRenderFrame) == 112);
-    static_assert(std::is_standard_layout_v<PanelRegistration> && sizeof(PanelRegistration) == 216);
+    static_assert(std::is_standard_layout_v<ImGuiBuild> && sizeof(ImGuiBuild) == 56);
+    static_assert(std::is_standard_layout_v<ImGuiBinding> && sizeof(ImGuiBinding) == 32);
+    static_assert(std::is_standard_layout_v<PanelSetup> && sizeof(PanelSetup) == 80);
+    static_assert(std::is_standard_layout_v<PanelDrawFrame> && sizeof(PanelDrawFrame) == 152);
+    static_assert(std::is_standard_layout_v<PanelRegistration> && sizeof(PanelRegistration) == 288);
     static_assert(std::is_standard_layout_v<PanelPresentation> && sizeof(PanelPresentation) == 80);
     static_assert(std::is_standard_layout_v<PanelState> && sizeof(PanelState) == 88);
     static_assert(std::is_standard_layout_v<Api> && sizeof(Api) == 64);

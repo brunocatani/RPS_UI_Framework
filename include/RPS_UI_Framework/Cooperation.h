@@ -30,7 +30,8 @@ namespace rpsui::api::cooperation
     }
 
     // Claim scopes, not a D3D sandbox. Scene access and direct hook ownership
-    // cannot be granted to a panel callback; use only its private color target.
+    // cannot be granted to a panel callback: it issues ImGui calls, and the
+    // host renders them into the panel's private color target.
     inline constexpr std::uint64_t kPanelAccess = accessMask(RenderAccess::PanelColorWrite);
     inline constexpr std::uint64_t kHostExclusiveAccess = accessMask(RenderAccess::SceneColorWrite) |
         accessMask(RenderAccess::SceneDepthWrite) | accessMask(RenderAccess::StereoSubmissionHook);
@@ -110,7 +111,7 @@ namespace rpsui::api::cooperation
         Result(RPSUI_CALL* unregisterConsumerSafely)(std::uint64_t ownerToken) noexcept {};
     };
 
-    static_assert(std::is_standard_layout_v<PanelRegistration> && sizeof(PanelRegistration) == 240);
+    static_assert(std::is_standard_layout_v<PanelRegistration> && sizeof(PanelRegistration) == 312);
     static_assert(std::is_standard_layout_v<PanelAgreement> && sizeof(PanelAgreement) == 96);
     static_assert(std::is_standard_layout_v<ConsumerDirectoryEntry> && sizeof(ConsumerDirectoryEntry) == 168);
     static_assert(std::is_standard_layout_v<PanelDirectoryEntry> && sizeof(PanelDirectoryEntry) == 272);

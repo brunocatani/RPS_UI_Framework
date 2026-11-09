@@ -5,6 +5,7 @@
 #include "PanelSeparationPolicy.h"
 
 #include "Logger.h"
+#include "render/PanelImGui.h"
 #include "render/SceneDepthCapture.h"
 #include "WorldDrawStore.h"
 
@@ -163,16 +164,19 @@ namespace rpsui
         snapshots.clear();
         for (const auto index : openPanels_) {
             const auto& panel = panels_[index];
-            if ((!panel.renderCallback && !panel.numberOverlay) || (panel.numberOverlay && !numberInputReady_)) {
+            if ((!panel.drawCallback && !panel.numberOverlay) || (panel.numberOverlay && !numberInputReady_)) {
                 continue;
             }
             snapshots.panels[snapshots.count++] = {
                 .panelHandle = panel.panelHandle,
-                .renderCallback = panel.renderCallback,
+                .setupCallback = panel.setupCallback,
+                .drawCallback = panel.drawCallback,
                 .userData = panel.userData,
                 .callbackGate = panel.callbackGate,
                 .pixelWidth = panel.pixelWidth,
                 .pixelHeight = panel.pixelHeight,
+                .layoutWidth = panel.layoutWidth,
+                .layoutHeight = panel.layoutHeight,
                 .sortOrder = panel.sortOrder,
                 .flags = panel.flags,
                 .numberOverlay = panel.numberOverlay,
@@ -334,6 +338,9 @@ namespace rpsui
             updateDepthRequestLocked();
             if (drain && !drained) return api::Result::CallbackBusy;
 
+            for (const auto& panel : panels_) {
+                if (panel.ownerToken == ownerToken) render::panel_imgui::retire(panel.panelHandle);
+            }
             panels_.erase(
                 std::remove_if(
                     panels_.begin(),
@@ -390,13 +397,31 @@ namespace rpsui
                     registration.minimumPhysicalWidth &&
                 registration.defaultPhysicalWidth <=
                     registration.maximumPhysicalWidth;
+            // Both layout extents zero (pixel units) or both set, at the pixel aspect.
+            const bool pixelLayout = registration.layoutWidth == 0.0f && registration.layoutHeight == 0.0f;
+            const bool layoutValid = pixelLayout ||
+                (std::isfinite(registration.layoutWidth) && std::isfinite(registration.layoutHeight) &&
+                    registration.layoutWidth >= 64.0f && registration.layoutHeight >= 64.0f &&
+                    std::abs(registration.layoutWidth * static_cast<float>(registration.pixelHeight) -
+                        registration.layoutHeight * static_cast<float>(registration.pixelWidth)) <=
+                        0.01f * registration.layoutWidth * static_cast<float>(registration.pixelHeight));
             if (panelId.empty() ||
                 displayName.empty() ||
                 !dimensionsValid ||
                 !widthsValid ||
+                !layoutValid ||
+                registration.reserved != 0 ||
                 (registration.flags & ~15u) != 0 ||
-                (!registration.renderCallback && !numberOverlay)) {
+                (!registration.drawCallback && !numberOverlay)) {
                 return rpsui::api::Result::InvalidArgument;
+            }
+            if (!numberOverlay && !render::panel_imgui::buildMatches(registration.imgui)) {
+                const auto host = render::panel_imgui::hostBuild();
+                log::critical("Refused panel '{}': its Dear ImGui build (version {}, context {} bytes, wchar {}) "
+                              "differs from RPS UI Framework's (version {}, context {} bytes, wchar {})",
+                    panelId, registration.imgui.versionNum, registration.imgui.contextSize, registration.imgui.wcharSize,
+                    host.versionNum, host.contextSize, host.wcharSize);
+                return rpsui::api::Result::ImGuiBuildMismatch;
             }
 
             std::scoped_lock lock(mutex_);
@@ -446,7 +471,10 @@ namespace rpsui
                 .numberOverlay = numberOverlay,
                 .passive = passive || numberOverlay,
                 .focusedInput = focusedInput,
-                .renderCallback = registration.renderCallback,
+                .layoutWidth = registration.layoutWidth,
+                .layoutHeight = registration.layoutHeight,
+                .setupCallback = numberOverlay ? nullptr : registration.setupCallback,
+                .drawCallback = numberOverlay ? nullptr : registration.drawCallback,
                 .userData = registration.userData,
                 .callbackGate = std::make_shared<PanelCallbackGate>(),
             };
@@ -497,7 +525,7 @@ namespace rpsui
         if (registration.version != api::kRecordVersion) return api::Result::VersionMismatch;
         constexpr auto required = static_cast<unsigned>(api::framework::PanelFlag::Transparent) |
             static_cast<unsigned>(api::framework::PanelFlag::FixedSize);
-        if (registration.flags != required || !registration.renderCallback) return api::Result::InvalidArgument;
+        if (registration.flags != required || !registration.drawCallback) return api::Result::InvalidArgument;
         return registerPanelImpl(owner, registration, handle, false, nullptr, false, true);
     }
 
@@ -690,6 +718,7 @@ namespace rpsui
             }
             updateDepthRequestLocked();
             if (drain && !drained) return api::Result::CallbackBusy;
+            render::panel_imgui::retire(panelHandle);
             panels_.erase(panel);
             rebuildOpenPanelsLocked();
             ++registryRevision_;

@@ -19,6 +19,11 @@ namespace rpsui::required_updates
     // Any thread. A call to one of the pre-2.0 exports, which only refuse.
     void noteRetiredExport(const char* exportName, const void* callerAddress) noexcept;
 
+    // Any thread. A panel registration whose Dear ImGui build differs from the
+    // host's (framework::ImGuiBuild): its panel would draw into a context its
+    // code cannot read safely, so it is refused like an outdated consumer.
+    void noteImGuiBuildMismatch(const char* panelId, const void* callerAddress) noexcept;
+
     // Once, from the F4SE GameDataReady message.
     void watch() noexcept;
 }

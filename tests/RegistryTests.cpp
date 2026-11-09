@@ -1,5 +1,6 @@
 #include "PCH.h"
 #include "FrameworkRuntime.h"
+#include "render/PanelImGui.h"
 #include <RPS_UI_Framework/Client.h>
 #include <RPS_UI_Framework/PassivePanel.h>
 #include <RPS_UI_Framework/FocusedPanel.h>
@@ -44,7 +45,7 @@ namespace {
         const Table* table{};
         return acquire(&RPSUI_QueryInterfaceV1, table) == Result::Ok ? table : nullptr;
     }
-    void RPSUI_CALL render(const framework::PanelRenderFrame*, void*) noexcept {}
+    void RPSUI_CALL draw(const framework::PanelDrawFrame*, void*) noexcept {}
     unsigned inputCallbacks{};
     std::array<unsigned, rpsui::kInputSubscriberCapacity> inputOrder{};
     void RPSUI_CALL onInput(const input::Frame*, void* context) noexcept {
@@ -57,9 +58,31 @@ namespace {
         std::snprintf(value.panelId, sizeof(value.panelId), "test.panel.%u", id);
         std::snprintf(value.displayName, sizeof(value.displayName), "Panel %u", id);
         value.flags = unsigned(framework::PanelFlag::Transparent) | unsigned(framework::PanelFlag::FixedSize);
-        value.renderCallback = &render;
+        value.drawCallback = &draw;
+        value.imgui = rpsui::render::panel_imgui::hostBuild();
         value.sortOrder = -static_cast<int>(id);
         return value;
+    }
+
+    // A consumer compiled against another Dear ImGui build would read the host's
+    // context with the wrong layout; its panel is refused before any callback.
+    void testImGuiBuildRefused()
+    {
+        const auto* api = served<framework::Api>();
+        require(api, "framework negotiation failed");
+        framework::ConsumerRegistration consumer;
+        std::strcpy(consumer.consumerId, "imgui-build-test"); std::strcpy(consumer.displayName, "ImGui build test");
+        framework::ConsumerHandle owner;
+        require(api->registerConsumer(&consumer, &owner) == Result::Ok, "imgui build owner failed");
+        auto reg = registration(3000);
+        reg.imgui.contextSize += 8;
+        std::uint64_t handle{};
+        require(api->registerPanel(owner.ownerToken, &reg, &handle) == Result::ImGuiBuildMismatch && handle == 0,
+            "a different Dear ImGui build was accepted");
+        reg.imgui = rpsui::render::panel_imgui::hostBuild();
+        require(api->registerPanel(owner.ownerToken, &reg, &handle) == Result::Ok && handle != 0,
+            "the host's own Dear ImGui build was refused");
+        require(api->unregisterConsumer(owner.ownerToken) == Result::Ok, "imgui build owner retained");
     }
 
     void testFocusedPanels()
@@ -376,6 +399,7 @@ int main() try
     runtime.snapshotRenderPanels(*batch);
     require(batch->empty() && !runtime.hasOpenPanels() && !rpsui::render::SceneDepthCapture::requested, "final cleanup retained work");
     testFocusedPanels();
+    testImGuiBuildRefused();
     std::cout << "256 consumers / 1024 mixed panels / 256 input subscribers: discovery, pagination, render capacity and safe retirement passed.\n";
     return 0;
 }

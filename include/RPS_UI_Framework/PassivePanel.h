@@ -3,7 +3,7 @@
 
 // Visual-only panels. The host never hit-tests these panels, captures input for
 // them, resizes them or separates their poses. Require Transparent|FixedSize and
-// a render callback. Submit poses through the Framework interface; retire
+// a draw callback. Submit poses through the Framework interface; retire
 // callbacks through the Cooperation interface's safe unregister calls.
 #pragma pack(push, 8)
 namespace rpsui::api::passive_panel

@@ -19,7 +19,10 @@ Registers consumers and world panels, submits panel poses and reads panel state.
 | `defaultPhysicalWidth`, `minimumPhysicalWidth`, `maximumPhysicalWidth` | World size in game units |
 | `sortOrder` | Composition order |
 | `flags` | `PanelFlag` bits; zero is a rectangular opaque panel |
-| `renderCallback`, `userData` | Called to draw the panel; keep both alive until the panel is unregistered |
+| `layoutWidth`, `layoutHeight` | ImGui's display size. Both zero uses the pixel size; otherwise set both, at the pixel size's aspect |
+| `imgui` | Your Dear ImGui build, `RPSUI_IMGUI_BUILD()` |
+| `setupCallback` | Optional. Called once per ImGui context before its first frame |
+| `drawCallback`, `userData` | Called every frame the panel is open; keep both alive until the panel is unregistered |
 
 `PanelFlag` values:
 
@@ -34,9 +37,48 @@ Registers consumers and world panels, submits panel poses and reads panel state.
 
 `submitPanelPresentation` sends a `PanelPresentation` with a rising `sequence`, a `PanelPose` in game units and the `open` state. `getPanelState` returns the current pose, pointer hand and resize state. `resetPanelSize` returns the panel to its default width.
 
-## Rendering
+## Drawing
 
-The `PanelRenderCallback` receives a `PanelRenderFrame` holding the D3D11 device, context and render target view, as `void*`, plus the pixel size, the pointer position and the button state. The frame is borrowed for the call. `backDown` is the gated physical grip of the pointing hand; derive edges from it locally. `deviceGeneration` changes when device resources must be recreated.
+RPS UI draws every panel with [Dear ImGui](https://github.com/ocornut/imgui). The host owns each panel's ImGui context: the DX11 renderer, the font atlas, the input it feeds and the frame. Your mod only issues ImGui calls.
+
+### Building Dear ImGui
+
+Compile your own copy of Dear ImGui from the same revision as the host, `1.93.0 WIP` (`IMGUI_VERSION_NUM` 19294, upstream commit `f562ab8e`), with `RPS_UI_Framework/ImGuiBuild.h` as its user configuration:
+
+```cmake
+add_library(my_imgui STATIC "${IMGUI_DIR}/imgui.cpp" "${IMGUI_DIR}/imgui_draw.cpp"
+  "${IMGUI_DIR}/imgui_tables.cpp" "${IMGUI_DIR}/imgui_widgets.cpp")
+target_include_directories(my_imgui PUBLIC "${IMGUI_DIR}" "${RPSUI_INCLUDE_DIR}")
+target_compile_definitions(my_imgui PUBLIC IMGUI_USER_CONFIG="RPS_UI_Framework/ImGuiBuild.h")
+```
+
+Leave out the DX11 backend: the host renders. If you need more configuration, include `RPS_UI_Framework/ImGuiBuild.h` first from your own user configuration file. Nothing that changes ImGui's data layout may differ.
+
+`registerPanel` compares `PanelRegistration::imgui` with the host's build and refuses another one with `ImGuiBuildMismatch`. The refusal is logged with your DLL and stops the game at the main menu, like an outdated consumer.
+
+### Callbacks
+
+Both callbacks run on the render thread. Start each with `RPSUI_IMGUI_BIND(setup->imgui)` or `RPSUI_IMGUI_BIND(frame->imgui)`: it makes the host's context current in your copy of ImGui and switches your copy to the host's allocator, so memory crosses the DLL boundary safely. Include `<imgui_internal.h>` beside `<imgui.h>` where you expand `RPSUI_IMGUI_BUILD()`.
+
+```cpp
+void RPSUI_CALL draw(const rpsui::api::framework::PanelDrawFrame* frame, void* userData) noexcept
+{
+    RPSUI_IMGUI_BIND(frame->imgui);
+    ImGui::SetNextWindowPos({ 0, 0 });
+    ImGui::SetNextWindowSize({ frame->layoutWidth, frame->layoutHeight });
+    ImGui::Begin("Example", nullptr, ImGuiWindowFlags_NoDecoration);
+    ImGui::TextUnformatted("Hello");
+    ImGui::End();
+}
+```
+
+`setupCallback` receives a `PanelSetup` once per context, before its first frame: on the panel's first draw, after a device change, and after the host rebuilt a context whose draw failed. Add fonts, set the style and create textures there. Fonts and textures you add belong to that context; `contextGeneration` changes when it is replaced, and anything made for the old one must be made again. `defaultFont` is the host's text face (Consolas, or ImGui's built-in face when Windows has no Consolas), which is also `io.FontDefault`; the default size is 20 pixels.
+
+`drawCallback` receives a `PanelDrawFrame` between the host's `NewFrame` and `Render`. Before calling it, the host has set the display size, fed the pointer position, the primary button and the scroll axes, and turned the software cursor on while the pointer is valid. You may change `io.MouseDrawCursor` during the frame. The frame's coordinates are in layout units, the same as ImGui's `DisplaySize` and `MousePos`. `backDown` is the gated physical grip of the pointing hand; derive edges from it locally.
+
+`d3dDevice` is the `ID3D11Device` for your own textures (`ImTextureID` is an `ID3D11ShaderResourceView*`). There is no render target or device context: the host renders the frame into the panel's own texture. Rebuild device textures when `deviceGeneration` changes.
+
+An ImGui context lives until the panel is unregistered or the device changes, so ImGui state such as scroll positions survives closing and reopening the panel. Unbalanced `Begin`/`End` calls are recovered without asserts.
 
 ## Readiness
 
