@@ -5,6 +5,10 @@ Shared world-space UI and VR controller interaction for Fallout 4 VR mods.
 RPS UI Framework powers RobCo PALM and its configuration panels. Install it when
 a mod lists it as a requirement; individual mods supply their menus.
 
+It works alongside [Mods Config FO4 VR](https://github.com/ArthurHub/F4VR-Mods-Config):
+while that menu is open, the controllers belong to it and RPS UI panels take no
+input until it closes.
+
 ## For developers
 
 The public UI API headers are in this repository's [include/](include/RPS_UI_Framework/),

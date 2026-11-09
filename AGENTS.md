@@ -32,6 +32,7 @@ Menus, settings pages and their persistence belong to the mods that show them. R
 - Released contracts never change. Retired export names, interface IDs, slot meanings, enum values and flag bits are never reused.
 - Every version refusal and retired-export call is logged with the calling DLL and stops the game at the main menu with an error box (`src/RequiredUpdates.cpp`).
 - Native controller input works without ROCK or a skeleton provider.
+- Input yields while Mods Config FO4 VR's menu is open (`src/ModsConfigMenu.cpp`, read through its public `getMenuState`). Both mods hide controller buttons from every other reader of the shared IVRSystem vtable, so only one of them may take input at a time. Its hooks of the same call sites (main tick, scene-depth commit, controller polls, window procedure) chain with ours in either load order; keep every hook here chaining onto a foreign detour rather than refusing it.
 - Keyboard capture (`src/KeyboardCapture.cpp`) changes no engine state: it withholds raw key presses and `WM_CHAR` from the game window while held. Key releases always pass, or a key would stay held in the game's key table.
 - Screen-positioned drawing does not exist. World drawing is anchored to world points, and text is projected per eye.
 - The host owns every panel's Dear ImGui context, renderer, input feeding and frame; a consumer never receives a render target or device context. A consumer's Dear ImGui build must match the host's (`ImGuiBuild.h`), or its panel is refused and the game stops at the main menu.

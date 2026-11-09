@@ -5,6 +5,7 @@
 #include "FrameworkRuntime.h"
 #include "PanelCooperation.h"
 #include "KeyboardCapture.h"
+#include "ModsConfigMenu.h"
 #include "Logger.h"
 #include "vrcf/VRControllersManager.h"
 #include <bit>
@@ -37,6 +38,10 @@ struct State {
  std::atomic_bool installed{},session{},allowPollCapture{};
  std::atomic_uint32_t devices[2]{vr::k_unTrackedDeviceIndexInvalid,vr::k_unTrackedDeviceIndexInvalid};
  std::atomic_uint64_t raw[2]{};
+ // Buttons withheld when input yielded to Mods Config's menu, until each is released.
+ // Written by the game tick, read by arbitrary OpenVR poll threads.
+ std::atomic_uint64_t yieldDrain[2]{};
+ bool yielding{}; // Game tick only.
  bool hostCapture[2]{},hostConfig[2]{},hostStick[2]{};
  bool hostFrame{}; // Serialized by FrameworkRuntime's control mutex.
  unsigned failureStage{};
@@ -70,8 +75,9 @@ bool prefix(std::uintptr_t rva,std::initializer_list<unsigned char> expected) {
 }
 bool RPSUI_CALL rawInputReadActive() noexcept {return selfRead;}
 std::uint64_t RPSUI_CALL capturedButtons(unsigned side,std::uint64_t leftPressed,std::uint64_t rightPressed) noexcept {
- auto& s=state();if(side>=2 || !s.allowPollCapture.load())return 0;
- std::uint64_t mask=0;
+ auto& s=state();if(side>=2)return 0;
+ std::uint64_t mask=s.yieldDrain[side].load(std::memory_order_acquire);
+ if(!s.allowPollCapture.load())return mask;
  for(unsigned word=0;word<s.activeMasks.size();++word) {
   auto bits=s.activeMasks[word].load(std::memory_order_acquire);
   while(bits) {
@@ -134,6 +140,21 @@ void publishMask(unsigned slot,const api::input::Capture& capture) {
 void releaseKeyboardLocked(State& s) noexcept {
  if(s.keyboardOwner){s.keyboardOwner=0;keyboard::setCaptured(false);}
 }
+// Mods Config's menu takes input while the game still does, so yielding must not hand
+// the game the rest of a press RPS UI was withholding: whatever was captured when the
+// yield began stays withheld from every reader until that button is released.
+void drainYieldedPresses(State& s,bool yielding,const std::array<std::uint64_t,2>& pressed) noexcept {
+ for(unsigned side=0;side<2;++side) {
+  auto held=s.yieldDrain[side].load(std::memory_order_relaxed);
+  if(yielding && !s.yielding)held|=capturedButtons(side,pressed[0],pressed[1]);
+  s.yieldDrain[side].store(held&pressed[side],std::memory_order_release);
+ }
+ s.yielding=yielding;
+}
+void clearYieldDrain(State& s) noexcept {
+ for(auto& held:s.yieldDrain)held.store(0,std::memory_order_release);
+ s.yielding=false;
+}
 void update() {
  auto& s=state();++s.frame.sequence;s.frame.seconds=std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
  s.frame.ready=false;s.frame.hands[0]={};s.frame.hands[1]={};
@@ -160,9 +181,13 @@ void update() {
    }
    s.frame.ready=s.frame.hands[0].valid || s.frame.hands[1].valid;
    if(!s.frame.ready)stage=5;
+   else if(mods_config_menu::isOpen())stage=6;
   }
  }
- if(stage!=s.failureStage){s.failureStage=stage;log::info("UI input availability stage={} (0=ready, 1=session, 2=menu, 3=OpenVR, 4=player, 5=wand)",stage);}
+ if(stage!=s.failureStage){s.failureStage=stage;log::info("UI input availability stage={} (0=ready, 1=session, 2=menu, 3=OpenVR, 4=player, 5=wand, 6=Mods Config menu)",stage);}
+ const bool yielding=stage==6;
+ drainYieldedPresses(s,yielding,{s.frame.hands[0].pressed,s.frame.hands[1].pressed});
+ if(yielding){s.frame.ready=false;s.frame.hands[0]={};s.frame.hands[1]={};}
  s.allowPollCapture=s.frame.ready;
  FrameworkRuntime::get().handleInputFrame(s.frame);
  s.callbacks.clear();
@@ -173,7 +198,7 @@ void update() {
   if(!s.frame.ready || s.frame.sequence-s.keyboardRenewed>3)releaseKeyboardLocked(s);}
 }
 void safeUpdate() noexcept {
- try{update();}catch(...){auto& s=state();s.callbacks.clear();s.allowPollCapture=false;s.frame.ready=false;for(unsigned i=0;i<=maxClients;++i)publishMask(i,{});{std::scoped_lock lock(s.mutex);releaseKeyboardLocked(s);}static bool logged=false;if(!logged){logged=true;log::error("UI input frame failed; capture released");}}
+ try{update();}catch(...){auto& s=state();s.callbacks.clear();s.allowPollCapture=false;s.frame.ready=false;for(unsigned i=0;i<=maxClients;++i)publishMask(i,{});clearYieldDrain(s);{std::scoped_lock lock(s.mutex);releaseKeyboardLocked(s);}static bool logged=false;if(!logged){logged=true;log::error("UI input frame failed; capture released");}}
 }
 void tick(std::uint64_t argument) {
  originalTick(argument);
@@ -242,7 +267,7 @@ bool start() noexcept {
 bool installed() noexcept{return state().installed.load();}
 void sessionReady(bool ready) noexcept{
  auto& s=state();s.session=ready;if(ready)return;
- s.allowPollCapture=false;std::scoped_lock lock(s.mutex);releaseKeyboardLocked(s);
+ s.allowPollCapture=false;clearYieldDrain(s);std::scoped_lock lock(s.mutex);releaseKeyboardLocked(s);
 }
 bool rawButton(unsigned hand,unsigned button) noexcept{return hand<2 && button<64 && (state().frame.hands[hand].pressed&(1ull<<button));}
 void publishHostCapture() noexcept {

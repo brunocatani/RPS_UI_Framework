@@ -22,6 +22,10 @@ An idle chord reserves its members only while the complete chord is down. Once c
 
 `capturedButtons` is a read-only, lock-free query for any input thread. Supply the current physical button levels so pending chords resolve. It returns zero outside gameplay and after capture has been released or has expired.
 
+## Mods Config FO4 VR
+
+While the menu of Mods Config FO4 VR is open, input yields to it: every frame has `ready` false, as while a game menu is open, so subscribers stop, capture is released and the keyboard capture lapses. A button that was captured when the menu opened stays hidden from the game and from that menu until it is released, so a press already consumed by a panel never reaches either. Input returns when that menu closes, or when it is minimized while a mod shows its own UI.
+
 ## Physical keyboard
 
 `captureKeyboard` lets a subscriber take the physical keyboard for text entry, on the game callback thread. Call it every callback while a text field is active. Each call renews the capture and fills a `KeyboardRead` with what was typed since the last call, oldest first.

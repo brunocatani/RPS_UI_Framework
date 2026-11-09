@@ -1417,7 +1417,8 @@ namespace rpsui
             numberInputReady_=snapshot.ready;
             if (!snapshot.ready) {
                 clearPointerStateLocked();
-                // The game is not taking input, so there is no press left to keep from it.
+                // A game menu takes the input itself. When input yields to Mods Config's menu
+                // instead, the input service keeps withholding the held press until release.
                 for (auto& state : handState_) {
                     state.focusedPressDrain = false;
                     state.backPressDrain = false;
