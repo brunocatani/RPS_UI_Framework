@@ -27,8 +27,8 @@
 
 namespace rpsui::imgui_host
 {
-    // ImGui's default style is sized for a desktop monitor; a panel is read
-    // at arm's length. Consumers set their own size in their setup callback.
+    // The default face's size. ImGui's own default is sized for a desktop
+    // monitor; a panel is read at arm's length.
     inline constexpr float kDefaultFontSize = 20.0f;
     // Scroll axes arrive in stick deflection; ImGui wants wheel units.
     inline constexpr float kWheelUnitsPerSecond = 5.5f;
@@ -88,7 +88,9 @@ namespace rpsui::imgui_host
         io.ConfigErrorRecoveryEnableAssert = false;
         io.ConfigErrorRecoveryEnableDebugLog = false;
         io.ConfigErrorRecoveryEnableTooltip = false;
-        ImGui::GetStyle().FontSizeBase = kDefaultFontSize;
+        // style.FontSizeBase stays unset: the first frame takes io.FontDefault's
+        // size, so a consumer that installs its own default font in its setup
+        // callback gets that font's size.
     }
 
     // The default text face from face bytes the caller keeps alive for the
