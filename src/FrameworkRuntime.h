@@ -111,6 +111,8 @@ namespace rpsui
         void setRendererReady(bool ready) noexcept;
         void setHookStatus(api::cooperation::HookStatus status) noexcept;
         [[nodiscard]] bool isReady() const noexcept;
+        // The owner token belongs to a registered consumer.
+        [[nodiscard]] bool hasConsumer(std::uint64_t ownerToken) const noexcept;
         [[nodiscard]] bool hasOpenPanels() const noexcept;
         void snapshotRenderPanels(RenderPanelBatch& out) const noexcept;
 

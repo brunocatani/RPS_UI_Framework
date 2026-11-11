@@ -50,6 +50,7 @@ namespace rpsui::api
         PassivePanel = 6,
         Registry = 7,
         WorldDraw = 8,
+        SettingsMenu = 9,
     };
 
     static_assert(sizeof(void*) == 8, "RPS UI Framework requires a 64-bit consumer");

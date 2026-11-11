@@ -1,6 +1,6 @@
 # RPS UI Framework API
 
-RPS UI Framework publishes eight interfaces from `include/RPS_UI_Framework/`. The headers include only the C++ standard library and each other. They contain no CommonLibF4VR, F4SE or engine types. `ImGuiBuild.h` holds the Dear ImGui configuration panel consumers build with and two macros that expand to Dear ImGui calls in your own code; see [Drawing](Framework.md#drawing).
+RPS UI Framework publishes nine interfaces from `include/RPS_UI_Framework/`. The headers include only the C++ standard library and each other. They contain no CommonLibF4VR, F4SE or engine types. `ImGuiBuild.h` holds the Dear ImGui configuration panel consumers build with and two macros that expand to Dear ImGui calls in your own code; see [Drawing](Framework.md#drawing).
 
 | Interface | Header | Purpose | Page |
 | --- | --- | --- | --- |
@@ -11,6 +11,7 @@ RPS UI Framework publishes eight interfaces from `include/RPS_UI_Framework/`. Th
 | Input | `Input.h` | Controller frames, button capture and pointer aim | [Input](Input.md) |
 | Number overlays | `NumberOverlay.h` | Numbers the host draws itself | [NumberOverlay](NumberOverlay.md) |
 | Registry | `Registry.h` | Paged read-only census of consumers and panels | [Registry](Registry.md) |
+| Settings menu | `SettingsMenu.h` | Opening the settings menu and adding pages to it | [SettingsMenu](SettingsMenu.md) |
 | World drawing | `WorldDraw.h` | World-space spheres, lines, text and meshes | [WorldDraw](WorldDraw.md) |
 
 Each interface header declares its own `kMajor` and `kMinor`. Every interface is at major 2.

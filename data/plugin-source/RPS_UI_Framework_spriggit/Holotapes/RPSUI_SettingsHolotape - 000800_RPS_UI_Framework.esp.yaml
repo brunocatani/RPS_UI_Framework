@@ -1,0 +1,17 @@
+FormKey: 000800:RPS_UI_Framework.esp
+EditorID: RPSUI_SettingsHolotape
+ObjectBounds:
+  First: -3, -3, 0
+  Second: 3, 3, 1
+PreviewTransform: 0995A5:Fallout4.esm
+Name:
+  TargetLanguage: English
+  Value: RPS UI Settings
+Model:
+  File: Props\Holotape_Prop.nif
+  Data: 0x0400000000000000000000000000000000000000
+PickUpSound: 0BBFA8:Fallout4.esm
+PutDownSound: 0BBFA9:Fallout4.esm
+Data:
+  MutagenObjectType: HolotapeSound
+  Sound: 0BBFA8:Fallout4.esm

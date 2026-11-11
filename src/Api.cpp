@@ -5,13 +5,16 @@
 #include "InterfaceNegotiation.h"
 #include "Logger.h"
 #include "RequiredUpdates.h"
+#include "SettingsMenuHost.h"
 #include "WorldDrawStore.h"
+#include "settings_menu/ExternalPages.h"
 #include <RPS_UI_Framework/Cooperation.h>
 #include <RPS_UI_Framework/FocusedPanel.h>
 #include <RPS_UI_Framework/Framework.h>
 #include <RPS_UI_Framework/NumberOverlay.h>
 #include <RPS_UI_Framework/PassivePanel.h>
 #include <RPS_UI_Framework/Registry.h>
+#include <RPS_UI_Framework/SettingsMenu.h>
 #include <RPS_UI_Framework/WorldDraw.h>
 
 #include <array>
@@ -41,7 +44,9 @@ namespace
     Result RPSUI_CALL unregisterConsumer(
         std::uint64_t ownerToken) noexcept
     {
-        return rpsui::FrameworkRuntime::get().unregisterConsumer(ownerToken);
+        const auto result = rpsui::FrameworkRuntime::get().unregisterConsumer(ownerToken);
+        if (result == Result::Ok) rpsui::settings_menu::external_pages::removeOwner(ownerToken);
+        return result;
     }
 
     // A refused Dear ImGui build stops the game like an outdated consumer.
@@ -154,7 +159,11 @@ namespace
     Result RPSUI_CALL unregisterPanelSafely(std::uint64_t owner, std::uint64_t panel) noexcept
     { return rpsui::FrameworkRuntime::get().unregisterPanelSafely(owner, panel); }
     Result RPSUI_CALL unregisterConsumerSafely(std::uint64_t owner) noexcept
-    { return rpsui::FrameworkRuntime::get().unregisterConsumerSafely(owner); }
+    {
+        const auto result = rpsui::FrameworkRuntime::get().unregisterConsumerSafely(owner);
+        if (result == Result::Ok) rpsui::settings_menu::external_pages::removeOwner(owner);
+        return result;
+    }
 
     const cooperation::Api g_cooperation{
         .registerPanel = &registerCooperativePanel,
@@ -229,6 +238,55 @@ namespace
         .unregisterOverlay=&unregisterPanel,
     };
 
+    [[nodiscard]] bool finite3(const float (&value)[3]) noexcept
+    {
+        return std::isfinite(value[0]) && std::isfinite(value[1]) && std::isfinite(value[2]);
+    }
+
+    Result RPSUI_CALL openSettingsMenu(std::uint64_t owner, const settings_menu::OpenRequest* request) noexcept
+    {
+        if (!request || request->size < sizeof(*request)) return Result::InvalidArgument;
+        if (request->version != kRecordVersion) return Result::VersionMismatch;
+        if (!rpsui::FrameworkRuntime::get().hasConsumer(owner)) return Result::OwnerNotRegistered;
+        if (rpsui::settings_menu_host::isOpen()) return Result::ResourceConflict;
+        rpsui::settings_menu_host::Pose pose;
+        if (request->hasPose) {
+            const auto& value = request->pose;
+            if (!finite3(value.center) || !finite3(value.right) || !finite3(value.up) || !finite3(value.front))
+                return Result::InvalidPose;
+            std::copy_n(value.center, 3, pose.center);
+            std::copy_n(value.right, 3, pose.right);
+            std::copy_n(value.up, 3, pose.up);
+            std::copy_n(value.front, 3, pose.front);
+        }
+        return rpsui::settings_menu_host::open(request->hasPose ? &pose : nullptr) ? Result::Ok : Result::FrameworkNotReady;
+    }
+    Result RPSUI_CALL closeSettingsMenu(std::uint64_t owner) noexcept
+    {
+        if (!rpsui::FrameworkRuntime::get().hasConsumer(owner)) return Result::OwnerNotRegistered;
+        rpsui::settings_menu_host::close();
+        return Result::Ok;
+    }
+    bool RPSUI_CALL settingsMenuOpen() noexcept { return rpsui::settings_menu_host::isOpen(); }
+    Result RPSUI_CALL registerSettingsPage(std::uint64_t owner, const settings_menu::PageRegistration* registration,
+        std::uint64_t* handle) noexcept
+    {
+        if (!registration || !handle) return Result::InvalidArgument;
+        if (!rpsui::FrameworkRuntime::get().hasConsumer(owner)) return Result::OwnerNotRegistered;
+        return rpsui::settings_menu::external_pages::add(owner, *registration, *handle);
+    }
+    Result RPSUI_CALL unregisterSettingsPage(std::uint64_t owner, std::uint64_t handle) noexcept
+    { return rpsui::settings_menu::external_pages::remove(owner, handle); }
+    std::uint64_t RPSUI_CALL settingsMenuClosedCount() noexcept { return rpsui::settings_menu_host::closedCount(); }
+    const settings_menu::Api g_settingsMenu{
+        .open = &openSettingsMenu,
+        .close = &closeSettingsMenu,
+        .isOpen = &settingsMenuOpen,
+        .registerPage = &registerSettingsPage,
+        .unregisterPage = &unregisterSettingsPage,
+        .closedCount = &settingsMenuClosedCount,
+    };
+
     // Any thread; built on first use because the input table lives with the
     // input service.
     std::span<const InterfaceDescriptorV1> interfaces() noexcept
@@ -242,6 +300,7 @@ namespace
             rpsui::discovery::describe(g_passive),
             rpsui::discovery::describe(g_registry),
             rpsui::discovery::describe(g_worldDraw),
+            rpsui::discovery::describe(g_settingsMenu),
         };
         return entries;
     }

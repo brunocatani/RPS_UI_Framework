@@ -158,6 +158,12 @@ namespace rpsui
         hookStatus_.store(status, std::memory_order_release);
     }
 
+    bool FrameworkRuntime::hasConsumer(std::uint64_t ownerToken) const noexcept
+    {
+        std::scoped_lock lock(mutex_);
+        return hasConsumerLocked(ownerToken);
+    }
+
     bool FrameworkRuntime::isReady() const noexcept
     {
         std::scoped_lock lock(mutex_);

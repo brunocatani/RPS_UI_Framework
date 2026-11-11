@@ -95,6 +95,51 @@ file(GLOB_RECURSE sources CONFIGURE_DEPENDS
   "${SOURCE_DIR}/*.cpp")
 source_group(TREE "${ROOT_DIR}" FILES ${headers} ${sources})
 
+# The settings menu (src/settings_menu): every mod's settings pages, the Spawner and the Console.
+# It is its own library, once for the game and once for the desktop preview, which has no game.
+# It reads ROCK's and SCISSORS' Configuration tables, so it compiles against their public headers.
+list(FILTER headers EXCLUDE REGEX "/src/settings_menu/")
+list(FILTER sources EXCLUDE REGEX "/src/settings_menu/")
+set(ROCK_INCLUDE_DIR "${WORKSPACE_ROOT}/PROJECT_ROCK_V2/main_projects/ROCK/include"
+  CACHE PATH "ROCK public include directory")
+set(SCISSORS_INCLUDE_DIR "${WORKSPACE_ROOT}/PROJECT_ROCK_V2/main_projects/SCISSORS/include"
+  CACHE PATH "SCISSORS public include directory")
+set(DIAMOND_INCLUDE_DIR "${WORKSPACE_ROOT}/PROJECT_ROCK_V2/main_projects/DIAMOND/include"
+  CACHE PATH "DIAMOND public include directory")
+foreach(dir ROCK_INCLUDE_DIR SCISSORS_INCLUDE_DIR DIAMOND_INCLUDE_DIR)
+  if(NOT EXISTS "${${dir}}")
+    message(FATAL_ERROR "${dir} '${${dir}}' not found")
+  endif()
+endforeach()
+find_package(nlohmann_json CONFIG REQUIRED)
+set(SETTINGS_MENU_SOURCES
+  src/settings_menu/ConfiguratorRuntime.cpp
+  src/settings_menu/ConsoleService.cpp
+  src/settings_menu/ConsoleTab.cpp
+  src/settings_menu/CsahSettings.cpp
+  src/settings_menu/ExternalPages.cpp
+  src/settings_menu/IniSettingsStore.cpp
+  src/settings_menu/MenuTheme.cpp
+  src/settings_menu/render/MenuPanel.cpp
+  src/settings_menu/OnScreenKeyboard.cpp
+  src/settings_menu/RockSettingControlPolicy.cpp
+  src/settings_menu/ScissorsSettings.cpp
+  src/settings_menu/SpawnBrowser.cpp)
+foreach(target rpsui_settings_menu rpsui_settings_menu_preview)
+  add_library(${target} STATIC ${SETTINGS_MENU_SOURCES})
+  target_include_directories(${target} PUBLIC
+    "${SOURCE_DIR}/settings_menu" "${PUBLIC_INCLUDE_DIR}"
+    "${ROCK_INCLUDE_DIR}" "${SCISSORS_INCLUDE_DIR}" "${DIAMOND_INCLUDE_DIR}")
+  target_link_libraries(${target} PUBLIC rpsui_imgui spdlog::spdlog nlohmann_json::nlohmann_json shell32.lib)
+  target_compile_features(${target} PUBLIC cxx_std_23)
+  target_compile_definitions(${target} PUBLIC UNICODE _UNICODE)
+  target_precompile_headers(${target} PRIVATE src/settings_menu/PCH.h)
+  target_compile_options(${target} PRIVATE /utf-8 /wd4715)
+endforeach()
+target_sources(rpsui_settings_menu PRIVATE src/settings_menu/render/FrameworkPanelRenderer.cpp)
+target_link_libraries(rpsui_settings_menu PUBLIC F4VRCommon::framework)
+target_compile_definitions(rpsui_settings_menu_preview PUBLIC RPSUI_SETTINGS_MENU_PREVIEW)
+
 add_library(${PROJECT_NAME} SHARED
   ${headers}
   ${sources}
@@ -108,6 +153,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 target_link_libraries(${PROJECT_NAME} PRIVATE
   F4VRCommon::framework
   rpsui_imgui
+  rpsui_settings_menu
   RPS::Settings
   Microsoft::DirectXTK
   spdlog::spdlog
@@ -146,10 +192,39 @@ if(POST_BUILD_COPY_PLUGIN)
       COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "$<TARGET_PDB_FILE:${PROJECT_NAME}>"
         "${copy_path}/F4SE/Plugins/"
+      # data/mod: the game data the player installs (the settings holotape's plugin). Its
+      # source is data/plugin-source, a Spriggit project.
+      COMMAND ${CMAKE_COMMAND} -E copy_directory "${ROOT_DIR}/data/mod" "${copy_path}"
       COMMENT "Deploying RPS UI Framework to ${copy_path}")
   endforeach()
 endif()
 
+# RPSUISettingsPreview: the settings menu on the desktop, without the game (preview/). Its
+# sandbox starts from the mods' example settings files, copied beside it; with
+# RPSUI_SETTINGS_PREVIEW_COPY_PATH set, the build also copies it there to open it from.
+set(RPSUI_SETTINGS_PREVIEW_COPY_PATH "" CACHE PATH
+  "Folder the settings menu preview is copied to after each build; empty for none.")
+set(PAPER_CONFIG_DIR "${WORKSPACE_ROOT}/PROJECT_ROCK_V2/main_projects/PAPER/data/config"
+  CACHE PATH "PAPER's example settings files")
+add_executable(RPSUISettingsPreview WIN32 preview/SettingsMenuPreview.cpp)
+target_link_libraries(RPSUISettingsPreview PRIVATE rpsui_settings_menu_preview d3d11.lib dxgi.lib shell32.lib ole32.lib windowscodecs.lib)
+target_compile_definitions(RPSUISettingsPreview PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_options(RPSUISettingsPreview PRIVATE /utf-8)
+set(SETTINGS_PREVIEW_EXAMPLES
+  "${ROCK_INCLUDE_DIR}/../data/config/ROCK_example.toml"
+  "${ROCK_INCLUDE_DIR}/../data/config/ROCK_Developer_example.toml"
+  "${PAPER_CONFIG_DIR}/PAPER_example.toml")
+add_custom_command(TARGET RPSUISettingsPreview POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:RPSUISettingsPreview>/examples"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SETTINGS_PREVIEW_EXAMPLES} "$<TARGET_FILE_DIR:RPSUISettingsPreview>/examples/")
+if(NOT RPSUI_SETTINGS_PREVIEW_COPY_PATH STREQUAL "")
+  add_custom_command(TARGET RPSUISettingsPreview POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${RPSUI_SETTINGS_PREVIEW_COPY_PATH}/examples"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:RPSUISettingsPreview>" "${RPSUI_SETTINGS_PREVIEW_COPY_PATH}/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SETTINGS_PREVIEW_EXAMPLES} "${RPSUI_SETTINGS_PREVIEW_COPY_PATH}/examples/"
+    COMMENT "Settings menu preview in '${RPSUI_SETTINGS_PREVIEW_COPY_PATH}'")
+endif()
+add_dependencies(${PROJECT_NAME} RPSUISettingsPreview)
 option(RPS_UI_FRAMEWORK_BUILD_TESTS
   "Build deterministic framework contract tests." ON)
 if(RPS_UI_FRAMEWORK_BUILD_TESTS)
@@ -161,11 +236,11 @@ if(RPS_UI_FRAMEWORK_BUILD_TESTS)
   add_test(NAME RPSUIFramework.GraphicsStateCommit COMMAND RPSUIGraphicsStateCommitTests)
   # Exercise actual exported tables, registries and input subscriptions. The
   # test never installs native hooks; scene-depth demand is stubbed.
-  add_executable(RPSUIRegistryTests tests/RegistryTests.cpp src/FrameworkRuntime.cpp src/Api.cpp src/WorldDrawStore.cpp src/RequiredUpdates.cpp src/KeyboardCapture.cpp src/ModsConfigMenu.cpp src/render/PanelImGui.cpp src/UiSettings.cpp src/ThemeStore.cpp src/Haptics.cpp)
+  add_executable(RPSUIRegistryTests tests/RegistryTests.cpp src/FrameworkRuntime.cpp src/Api.cpp src/WorldDrawStore.cpp src/RequiredUpdates.cpp src/KeyboardCapture.cpp src/ModsConfigMenu.cpp src/render/PanelImGui.cpp src/UiSettings.cpp src/ThemeStore.cpp src/Haptics.cpp src/SettingsMenuHost.cpp src/SettingsHolotape.cpp)
   target_compile_features(RPSUIRegistryTests PRIVATE cxx_std_23)
   target_compile_definitions(RPSUIRegistryTests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX NOMMNOSOUND)
   target_include_directories(RPSUIRegistryTests PRIVATE "${SOURCE_DIR}" "${PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(RPSUIRegistryTests PRIVATE F4VRCommon::framework spdlog::spdlog rpsui_imgui RPS::Settings)
+  target_link_libraries(RPSUIRegistryTests PRIVATE F4VRCommon::framework spdlog::spdlog rpsui_imgui RPS::Settings rpsui_settings_menu)
   # No test calls OpenVR; defer its import so validation needs no game DLLs.
   target_link_libraries(RPSUIRegistryTests PRIVATE delayimp)
   target_link_options(RPSUIRegistryTests PRIVATE /DELAYLOAD:openvr_api.dll)
@@ -238,6 +313,71 @@ if(RPS_UI_FRAMEWORK_BUILD_TESTS)
   target_compile_options(RPSUIDiscoveryTests PRIVATE /UNDEBUG)
   target_include_directories(RPSUIDiscoveryTests PRIVATE "${SOURCE_DIR}" "${PUBLIC_INCLUDE_DIR}")
   add_test(NAME RPSUIFramework.Discovery COMMAND RPSUIDiscoveryTests)
+
+  # The settings menu: its stores against stub provider DLLs (named as the real mods, so the
+  # stores find them as loaded modules) and its pure policies. Runtime and Preview variants
+  # cover the game's and the desktop preview's paths through the same sources.
+  set(SETTINGS_MENU_TEST_DIR "${ROOT_DIR}/tests/settings_menu")
+  set(SETTINGS_MENU_STORE_SOURCES
+    src/settings_menu/IniSettingsStore.cpp src/settings_menu/ScissorsSettings.cpp
+    src/settings_menu/CsahSettings.cpp src/settings_menu/RockSettingControlPolicy.cpp)
+  function(settings_menu_test target)
+    add_executable(${target} ${ARGN})
+    target_include_directories(${target} PRIVATE "${SOURCE_DIR}/settings_menu" "${ROCK_INCLUDE_DIR}"
+      "${SCISSORS_INCLUDE_DIR}" "${DIAMOND_INCLUDE_DIR}" "${PUBLIC_INCLUDE_DIR}")
+    target_compile_features(${target} PRIVATE cxx_std_23)
+    target_compile_definitions(${target} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_options(${target} PRIVATE /UNDEBUG /utf-8)
+    target_link_libraries(${target} PRIVATE shell32 nlohmann_json::nlohmann_json)
+  endfunction()
+  foreach(stub ScissorsConfiguration:SCISSORS DiamondReload:DIAMOND EmittersModule:ROCK_Emitters)
+    string(REPLACE ":" ";" stub "${stub}")
+    list(GET stub 0 stub_source)
+    list(GET stub 1 stub_name)
+    add_library(SettingsMenu${stub_source}TestStub SHARED "${SETTINGS_MENU_TEST_DIR}/${stub_source}Stub.cpp")
+    target_include_directories(SettingsMenu${stub_source}TestStub PRIVATE
+      "${SCISSORS_INCLUDE_DIR}" "${DIAMOND_INCLUDE_DIR}" "${ROCK_INCLUDE_DIR}")
+    target_compile_features(SettingsMenu${stub_source}TestStub PRIVATE cxx_std_23)
+    set_target_properties(SettingsMenu${stub_source}TestStub PROPERTIES OUTPUT_NAME ${stub_name} EXCLUDE_FROM_ALL TRUE
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test-providers")
+  endforeach()
+  foreach(mode Runtime Preview)
+    settings_menu_test(SettingsMenuScissors${mode}Tests "${SETTINGS_MENU_TEST_DIR}/ScissorsSettingsTests.cpp" ${SETTINGS_MENU_STORE_SOURCES})
+    add_dependencies(SettingsMenuScissors${mode}Tests SettingsMenuScissorsConfigurationTestStub)
+    add_test(NAME SettingsMenu.Scissors${mode}
+      COMMAND SettingsMenuScissors${mode}Tests "$<TARGET_FILE:SettingsMenuScissorsConfigurationTestStub>")
+    settings_menu_test(SettingsMenuCsah${mode}Tests "${SETTINGS_MENU_TEST_DIR}/CsahSettingsTests.cpp" ${SETTINGS_MENU_STORE_SOURCES})
+    target_compile_definitions(SettingsMenuCsah${mode}Tests PRIVATE
+      SETTINGS_MENU_CSAH_TEST_DIR="${CMAKE_CURRENT_BINARY_DIR}/csah-test-${mode}")
+    add_test(NAME SettingsMenu.Csah${mode}
+      COMMAND SettingsMenuCsah${mode}Tests "${WORKSPACE_ROOT}/graphics_mods/CSAH/settings/PALMSettings.json")
+    settings_menu_test(SettingsMenuDiamond${mode}Tests "${SETTINGS_MENU_TEST_DIR}/DiamondSettingsTests.cpp" ${SETTINGS_MENU_STORE_SOURCES})
+    add_dependencies(SettingsMenuDiamond${mode}Tests SettingsMenuDiamondReloadTestStub)
+    add_test(NAME SettingsMenu.Diamond${mode}
+      COMMAND SettingsMenuDiamond${mode}Tests "$<TARGET_FILE:SettingsMenuDiamondReloadTestStub>")
+    settings_menu_test(SettingsMenuEmitters${mode}Tests "${SETTINGS_MENU_TEST_DIR}/EmittersSettingsTests.cpp" ${SETTINGS_MENU_STORE_SOURCES})
+    add_dependencies(SettingsMenuEmitters${mode}Tests SettingsMenuEmittersModuleTestStub)
+    target_compile_definitions(SettingsMenuEmitters${mode}Tests PRIVATE
+      SETTINGS_MENU_EMITTERS_TEST_DIR="${CMAKE_CURRENT_BINARY_DIR}/emitters-test-${mode}")
+    add_test(NAME SettingsMenu.Emitters${mode}
+      COMMAND SettingsMenuEmitters${mode}Tests "$<TARGET_FILE:SettingsMenuEmittersModuleTestStub>"
+        "${WORKSPACE_ROOT}/experimental_mods/ROCK_Emitters/data/config/ROCK_Emitters_example.toml")
+  endforeach()
+  foreach(test ScissorsPreview CsahPreview DiamondPreview EmittersPreview)
+    target_compile_definitions(SettingsMenu${test}Tests PRIVATE RPSUI_SETTINGS_MENU_PREVIEW)
+  endforeach()
+  foreach(policy SpawnPluginIdentity RockSettingControlPolicy PanelResizePolicy ConsoleLine ConsoleShortcuts)
+    settings_menu_test(SettingsMenu${policy}Tests "${SETTINGS_MENU_TEST_DIR}/${policy}Tests.cpp")
+    add_test(NAME SettingsMenu.${policy} COMMAND SettingsMenu${policy}Tests)
+  endforeach()
+  target_sources(SettingsMenuRockSettingControlPolicyTests PRIVATE src/settings_menu/RockSettingControlPolicy.cpp)
+  foreach(store IniSettingsStoreControl RockConfigurationBridge PreviewIsolation)
+    settings_menu_test(SettingsMenu${store}Tests "${SETTINGS_MENU_TEST_DIR}/${store}Tests.cpp" ${SETTINGS_MENU_STORE_SOURCES})
+    add_test(NAME SettingsMenu.${store} COMMAND SettingsMenu${store}Tests)
+  endforeach()
+  target_compile_definitions(SettingsMenuPreviewIsolationTests PRIVATE RPSUI_SETTINGS_MENU_PREVIEW)
+  settings_menu_test(SettingsMenuHelpTests "${SETTINGS_MENU_TEST_DIR}/SettingHelpTests.cpp")
+  add_test(NAME SettingsMenu.Help COMMAND SettingsMenuHelpTests)
 
   find_program(PWSH_EXECUTABLE NAMES pwsh REQUIRED)
   add_test(NAME RPSUIFramework.SourceContracts

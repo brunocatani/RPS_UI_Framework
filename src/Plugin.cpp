@@ -5,6 +5,7 @@
 #include "KeyboardCapture.h"
 #include "Logger.h"
 #include "RequiredUpdates.h"
+#include "SettingsMenuHost.h"
 #include "UiSettings.h"
 #include "render/PanelImGui.h"
 #include "render/RenderHooks.h"
@@ -91,9 +92,13 @@ namespace
         F4SE::MessagingInterface::Message* message) noexcept
     {
         if (message) {
-            if (message->type == F4SE::MessagingInterface::kPreLoadGame) rpsui::input::sessionReady(false);
-            if (message->type == F4SE::MessagingInterface::kNewGame) rpsui::input::sessionReady(true);
-            if (message->type == F4SE::MessagingInterface::kPostLoadGame) rpsui::input::sessionReady(message->data != nullptr);
+            const auto session = [](bool ready) {
+                rpsui::input::sessionReady(ready);
+                rpsui::settings_menu_host::onSessionReady(ready);
+            };
+            if (message->type == F4SE::MessagingInterface::kPreLoadGame) session(false);
+            if (message->type == F4SE::MessagingInterface::kNewGame) session(true);
+            if (message->type == F4SE::MessagingInterface::kPostLoadGame) session(message->data != nullptr);
         }
         if (!message ||
             message->type !=
@@ -140,6 +145,7 @@ namespace
         }
         // Optional service: panels and controller input work without it.
         (void)rpsui::keyboard::install();
+        rpsui::settings_menu_host::onHostReady();
         rpsui::log::info(
             "RPS UI Framework host is ready for UI consumers");
     }
@@ -200,6 +206,7 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(
             return false;
         }
         F4SE::AllocTrampoline(4096);
+        rpsui::settings_menu_host::onPluginLoad();
         const auto* messaging = F4SE::GetMessagingInterface();
         if (!messaging ||
             !messaging->RegisterListener(f4seMessageHandler)) {

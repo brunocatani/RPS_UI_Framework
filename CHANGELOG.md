@@ -8,6 +8,17 @@ box names each one, and the game closes when the box is closed.
 
 ### Added
 
+- **Settings menu.** Play the **RPS UI Settings** holotape in the Pip-Boy (from
+  `RPS_UI_Framework.esp`, given whenever a game starts or loads without one) to
+  open every RPS mod's settings, the Spawner and the Console, without the wheel.
+  RobCo PALM's Config opens the same menu. Each settings page starts with its
+  choices, named and explained in one line; numbers are under Fine-tuning, with a
+  Default button for values changed from ROCK's defaults. The ROCK Dev page shows
+  while ROCK's Developer Settings is on. The Console's shortcut buttons moved to
+  `Mods_Config\RPS_UI_Framework\ConsoleCommands.ini`.
+- **Settings menu preview** for developers: `RPSUISettingsPreview.exe` shows the
+  menu on the desktop from a sandbox of settings files, and `--capture` saves its
+  pages as pictures.
 - **Themes.** Every mod's panels draw with one theme you choose in
   `Documents\My Games\Fallout4VR\Mods_Config\RPS_UI_Framework\RPS_UI.toml`.
   Themes are files you can copy, edit and share. Built in: Pip-Boy (the
@@ -46,8 +57,8 @@ box names each one, and the game closes when the box is closed.
 
 ### For mod authors
 
-- Provider API **2.0**: eight interfaces (Framework, Cooperation, FocusedPanel,
-  Input, NumberOverlay, PassivePanel, Registry, WorldDraw) in
+- Provider API **2.0**: nine interfaces (Framework, Cooperation, FocusedPanel,
+  Input, NumberOverlay, PassivePanel, Registry, SettingsMenu, WorldDraw) in
   `include/RPS_UI_Framework/`, discovered through `RPSUI_QueryInterfaceV1`, one
   page each in `docs/api/`. The SDK folder is gone.
 - RPS UI now owns every panel's Dear ImGui context, renderer, fonts, input and
