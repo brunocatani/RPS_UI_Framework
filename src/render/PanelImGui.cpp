@@ -225,6 +225,7 @@ namespace rpsui::render::panel_imgui
             ImGui::SetCurrentContext(panel->context.get());
             if (snapshot.primaryDown && pressActivatedControl(*panel->context))
                 haptics::request(snapshot.pointerHand, haptics::kPressTick);
+            imgui_host::drawPointer(panel->theme->theme);
             imgui_host::endFrame();
             return true;
         } catch (...) {

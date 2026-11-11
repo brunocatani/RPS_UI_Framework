@@ -44,7 +44,22 @@ namespace rpsui::api::input
         // An idle chord reserves its members only while the complete chord is down.
         // Once captured, publish buttons until all chord members have been released.
         std::uint64_t chord[2]{};
+        // Thumbstick axes withheld from the game per hand, while the stick button (32) is
+        // not captured: StickAxis bits. Withholding only Vertical keeps turning on the
+        // horizontal axis. Frame still reports the whole stick. A request of the record's
+        // earlier size, without this field, withholds no axis this way.
+        std::uint8_t stickAxes[2]{};
+        std::uint8_t reservedBytes[6]{};
     };
+
+    enum class StickAxis : std::uint8_t
+    {
+        Horizontal = 1,
+        Vertical = 2,
+    };
+
+    // The size of Capture before stickAxes; capture() accepts both sizes.
+    inline constexpr std::uint32_t kCaptureSizeWithoutAxes = 40;
 
     struct PointerAim
     {
@@ -118,7 +133,7 @@ namespace rpsui::api::input
 
     static_assert(std::is_standard_layout_v<HandInput> && sizeof(HandInput) == 48);
     static_assert(std::is_standard_layout_v<Frame> && sizeof(Frame) == 128);
-    static_assert(std::is_standard_layout_v<Capture> && sizeof(Capture) == 40);
+    static_assert(std::is_standard_layout_v<Capture> && sizeof(Capture) == 48 && offsetof(Capture, stickAxes) == kCaptureSizeWithoutAxes);
     static_assert(std::is_standard_layout_v<PointerAim> && sizeof(PointerAim) == 24);
     static_assert(std::is_standard_layout_v<KeyboardEvent> && sizeof(KeyboardEvent) == 8);
     static_assert(std::is_standard_layout_v<KeyboardRead> && sizeof(KeyboardRead) == 272);

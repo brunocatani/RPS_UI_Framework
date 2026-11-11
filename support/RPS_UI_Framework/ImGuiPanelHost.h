@@ -169,6 +169,30 @@ namespace rpsui::imgui_host
         ImGui::NewFrame();
     }
 
+    /*
+     * The pointer, the same on every panel: a small ring with a centre dot in the theme's
+     * accent over a dark edge, so it reads on any colour. It replaces Dear ImGui's arrow when
+     * the panel shows a cursor (io.MouseDrawCursor, which a consumer may change); other
+     * shapes, such as resize arrows, stay ImGui's. Call after the draw callback, before
+     * endFrame, with the panel's context current.
+     */
+    inline void drawPointer(const api::framework::Theme& theme) noexcept
+    {
+        auto& io = ImGui::GetIO();
+        if (!io.MouseDrawCursor || ImGui::GetMouseCursor() != ImGuiMouseCursor_Arrow) return;
+        io.MouseDrawCursor = false;
+        if (!ImGui::IsMousePosValid()) return;
+        auto* draw = ImGui::GetForegroundDrawList();
+        const ImVec2 at = io.MousePos;
+        constexpr float radius = 7.0f, dot = 2.2f;
+        const ImU32 edge = ImGui::ColorConvertFloat4ToU32({ theme.background.r, theme.background.g, theme.background.b, 1.0f });
+        const ImU32 ink = ImGui::ColorConvertFloat4ToU32(color(theme.accent));
+        draw->AddCircle(at, radius, edge, 24, 4.0f);
+        draw->AddCircle(at, radius, ink, 24, 2.0f);
+        draw->AddCircleFilled(at, dot + 1.0f, edge, 12);
+        draw->AddCircleFilled(at, dot, ink, 12);
+    }
+
     inline void endFrame()
     {
         ImGui::Render();
@@ -263,6 +287,7 @@ namespace rpsui::imgui_host
             frame.backPressed = backPressed ? 1 : 0;
             panel_.drawCallback(&frame, panel_.userData);
             ImGui::SetCurrentContext(imgui_);
+            drawPointer(theme_);
             endFrame();
         }
 

@@ -23,6 +23,7 @@ struct Client {
 };
 struct PollCapture {
  std::atomic_uint64_t buttons[2]{},chord[2]{};
+ std::atomic_uint32_t stickAxes[2]{}; // api::input::StickAxis bits
 };
 struct State {
  std::mutex mutex;std::array<Client,maxClients> clients;
@@ -89,6 +90,16 @@ std::uint64_t RPSUI_CALL capturedButtons(unsigned side,std::uint64_t leftPressed
  }
  return mask;
 }
+// Withheld stick axes of one hand across every active capture; poll threads.
+std::uint32_t capturedStickAxes(unsigned side) noexcept {
+ auto& s=state();if(side>=2 || !s.allowPollCapture.load())return 0;
+ std::uint32_t axes{};
+ for(unsigned word=0;word<s.activeMasks.size();++word) {
+  auto bits=s.activeMasks[word].load(std::memory_order_acquire);
+  while(bits){const auto slot=word*64+std::countr_zero(bits);bits&=bits-1;axes|=s.masks[slot].stickAxes[side].load(std::memory_order_relaxed);}
+ }
+ return axes;
+}
 void filter(vr::TrackedDeviceIndex_t device,vr::VRControllerState_t* sample) noexcept {
  auto& s=state();int side=-1;
  for(int i=0;i<2;++i)if(device==s.devices[i].load()){side=i;break;}
@@ -100,6 +111,11 @@ void filter(vr::TrackedDeviceIndex_t device,vr::VRControllerState_t* sample) noe
  const auto axes=input_policy::axesForButtons(mask);
  for(unsigned axis=0;axis<vr::k_unControllerStateAxisCount;++axis)
   if(axes&(1u<<axis))sample->rAxis[axis]={};
+ // One thumbstick axis alone, so the other keeps reaching the game (turning while a
+ // panel scrolls with the vertical axis).
+ const auto stick=capturedStickAxes(side);
+ if(stick&static_cast<std::uint32_t>(api::input::StickAxis::Horizontal))sample->rAxis[0].x=0;
+ if(stick&static_cast<std::uint32_t>(api::input::StickAxis::Vertical))sample->rAxis[0].y=0;
 }
 bool poll(vr::IVRSystem* system,vr::TrackedDeviceIndex_t device,vr::VRControllerState_t* sample,std::uint32_t size) {
  const bool result=originalPoll(system,device,sample,size);if(result && size>=sizeof(*sample))filter(device,sample);return result;
@@ -132,9 +148,9 @@ unsigned nativeHand(std::uintptr_t player,std::uintptr_t offset,api::input::Hand
  return input_policy::nativeWandPose(transform,hand,aim)?0:3;
 }
 void publishMask(unsigned slot,const api::input::Capture& capture) {
- auto& s=state();for(unsigned hand=0;hand<2;++hand){s.masks[slot].buttons[hand]=capture.buttons[hand];s.masks[slot].chord[hand]=capture.chord[hand];}
+ auto& s=state();for(unsigned hand=0;hand<2;++hand){s.masks[slot].buttons[hand]=capture.buttons[hand];s.masks[slot].chord[hand]=capture.chord[hand];s.masks[slot].stickAxes[hand]=capture.stickAxes[hand]&3u;}
  const auto bit=std::uint64_t{1}<<(slot%64);
- if(capture.buttons[0] || capture.buttons[1] || capture.chord[0] || capture.chord[1])
+ if(capture.buttons[0] || capture.buttons[1] || capture.chord[0] || capture.chord[1] || (capture.stickAxes[0]&3u) || (capture.stickAxes[1]&3u))
   s.activeMasks[slot/64].fetch_or(bit,std::memory_order_release);
  else s.activeMasks[slot/64].fetch_and(~bit,std::memory_order_release);
 }
@@ -233,8 +249,13 @@ bool RPSUI_CALL setPointerAim(const api::input::PointerAim* value) noexcept {
  log::info("UI pointer aim degrees: left pitch={} yaw={}, right pitch={} yaw={}",value->pitchDegrees[0],value->yawDegrees[0],value->pitchDegrees[1],value->yawDegrees[1]);
  return true;
 }
-bool RPSUI_CALL capture(std::uint64_t token,const api::input::Capture* request) noexcept {
- if(!request || request->size!=sizeof(*request) || request->version!=api::kRecordVersion)return false;
+bool RPSUI_CALL capture(std::uint64_t token,const api::input::Capture* supplied) noexcept {
+ if(!supplied || (supplied->size!=sizeof(*supplied) && supplied->size!=api::input::kCaptureSizeWithoutAxes) ||
+    supplied->version!=api::kRecordVersion)return false;
+ // A request of the earlier size has no stickAxes; read only what the caller wrote.
+ api::input::Capture copy{};std::memcpy(&copy,supplied,supplied->size);
+ const auto* request=&copy;
+ if((request->stickAxes[0]|request->stickAxes[1])&~3u)return false;
  constexpr auto allowed=(1ull<<1)|(1ull<<2)|(1ull<<7)|(1ull<<32)|(1ull<<33);
  for(unsigned hand=0;hand<2;++hand)if((request->buttons[hand]|request->chord[hand])&~allowed)return false;
  auto& s=state();std::scoped_lock lock(s.mutex);

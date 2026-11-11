@@ -16,6 +16,8 @@ Value-only controller and keyboard input on the game thread. It needs no skeleto
 
 An idle chord reserves its members only while the complete chord is down. Once captured, publish `buttons` until all chord members have been released.
 
+`stickAxes` withholds single thumbstick axes from the game, per hand, as `StickAxis` bits (`Horizontal` 1, `Vertical` 2). Withholding only `Vertical` lets a panel scroll with the stick while the player still turns with it. `Frame` keeps reporting the whole stick, and `capturedButtons` does not include axes. Capturing the thumbstick button (32) still withholds the whole stick. A `Capture` of the earlier 40-byte size (`kCaptureSizeWithoutAxes`) is still accepted and withholds no axis this way.
+
 ## Cooperation with other input hooks
 
 `rawInputReadActive` is true only on the calling thread while the UI samples physical OpenVR state. A hook that sees it should leave that read raw.

@@ -30,6 +30,8 @@ box names each one, and the game closes when the box is closed.
   holds the keyboard, key presses go to it and not to the game.
 - Panels that show guides without taking input, and number overlays, for mods
   that need them.
+- **A ring pointer.** Every panel's pointer is a small ring with a centre dot in
+  the theme's colour instead of an arrow.
 
 ### Fixed
 
