@@ -15,7 +15,8 @@ box names each one, and the game closes when the box is closed.
   choices, named and explained in one line; numbers are under Fine-tuning, with a
   Default button for values changed from ROCK's defaults. The ROCK Dev page shows
   while ROCK's Developer Settings is on. The Console's shortcut buttons moved to
-  `Mods_Config\RPS_UI_Framework\ConsoleCommands.ini`.
+  `Mods_Config\RPS_UI_Framework\ConsoleCommands.ini`; shortcuts you wrote for
+  RobCo PALM are copied there the first time.
 - **Settings menu preview** for developers: `RPSUISettingsPreview.exe` shows the
   menu on the desktop from a sandbox of settings files, and `--capture` saves its
   pages as pictures.

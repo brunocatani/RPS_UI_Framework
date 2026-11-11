@@ -201,6 +201,15 @@ namespace rpsui::settings_menu::console
         CoTaskMemFree(documents);
 
         std::error_code error;
+        // The Console moved here from RobCo PALM: a player's shortcuts written for PALM are
+        // copied once, when this file does not exist yet. PALM's file is left as it is.
+        const auto palmFile = path.parent_path().parent_path() / "RobCo_PALM" / "ConsoleCommands.ini";
+        if (!std::filesystem::exists(path, error) && std::filesystem::is_regular_file(palmFile, error)) {
+            std::filesystem::create_directories(path.parent_path(), error);
+            if (std::filesystem::copy_file(palmFile, path, error)) {
+                logger::info("RPS UI copied the console shortcuts from {}", palmFile.string());
+            }
+        }
         if (!std::filesystem::exists(path, error)) {
             std::filesystem::create_directories(path.parent_path(), error);
             std::ofstream created(path, std::ios::binary);
