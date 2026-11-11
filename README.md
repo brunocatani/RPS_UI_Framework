@@ -25,7 +25,8 @@ stick, and release grip to place it. A short grip press is Back.
 The public UI API headers are in this repository's [include/](include/RPS_UI_Framework/),
 with one page per interface in [docs/api/](docs/api/Overview.md). Add `include/`
 to your include path through a CMake cache variable such as `RPSUI_INCLUDE_DIR`;
-never copy the headers into your project. Read the
+never copy the headers into your project. A mod built against RPS UI Framework 1.1
+is updated with [Migration](docs/api/Migration.md). Read the
 [DevArtificial documentation](https://devartificial.pro/docs/apis/ui)
 for setup and integration guides.
 

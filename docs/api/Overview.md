@@ -55,7 +55,7 @@ Tables and descriptors stay valid for the life of the process. Discovery can be 
 
 Major 1 is refused. RPS UI Framework logs every version refusal with the calling DLL, then stops the game at the main menu with an error box that names the mod to update.
 
-The pre-2.0 exports (`RPSUI_RequestApi` and the other `RPSUI_Request*` functions) stay exported, return no table and report the same stop. Their names are never reused.
+The pre-2.0 exports (`RPSUI_RequestApi` and the other `RPSUI_Request*` functions) stay exported, return no table and report the same stop. Their names are never reused. A mod built against 1.1 is updated with [Migration](Migration.md).
 
 ## Records and results
 
