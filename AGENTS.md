@@ -28,6 +28,19 @@ The plugin is `F4SE/Plugins/RPS_UI_Framework.dll` and `RPS_UI_Framework.esp` at 
 
 Each mod owns its settings and their files; the settings menu only shows and edits them (ROCK's through ROCK's Configuration API). Other menus belong to the mods that show them. RobCo PALM owns the wheel and persists the shared pointer aim. Consumers own their panel contents (their ImGui calls, fonts, styles and textures) and keep their callback data alive until a safe unregister returns `Ok`.
 
+## Settings menu
+
+- Runtime availability comes from the loaded modules (`src/settings_menu/RpsMod.h`). The menu never changes a provider's published contract.
+- ROCK's consumer and developer pages share one configuration registration: read the catalog from ROCK's negotiated Configuration API and route writes to ROCK. PAPER's page edits `PAPER.toml` line by line through the file editor (`src/settings_menu/IniSettingsStore.cpp`), which reads TOML files as RPS Framework's settings store writes them (`## === ` category headings, `##` help, single-`#` player notes, quoted strings) and INI files; PAPER's watcher applies the edit.
+- SCISSORS pages (consumer and developer) bind only `SCISSORS.dll`'s `SCISSORS_GetConfiguration` 2.0 table, from SCISSORS' own `include/` (`SCISSORS_INCLUDE_DIR`). Never forward NPC settings through ROCK or write SCISSORS' settings files directly. `PhysicalMelee` lives on the SCISSORS Dev page and goes through SCISSORS Configuration, never ROCK configuration.
+- The RPS UI page edits `RPS_UI.toml` through the same file editor; its Theme dropdown lists the files in the `Themes` folder beside it.
+- Preview builds never discover or write a real provider, and injected fixtures stay read-only.
+
+- The Console hooks the call to `ConsoleLog::AddString` at plugin load (`src/settings_menu/ConsoleService.cpp`), after checking the live bytes, and runs commands through `Console::ExecuteCommand`, so the native Console menu is never needed. Commands containing `%` are refused: the engine echoes a command through its print function as the format string.
+- The on-screen keyboard is its own panel (`rpsui.settings.keyboard`, `src/settings_menu/OnScreenKeyboard.cpp`) under the menu. It is up on the Console tab, and on the Spawner while one of its searches is open. Both keyboards feed a `ConsoleLine`, not an ImGui text field, because clicking a key would take focus from that field. The real keyboard is captured only while the keyboard panel is up.
+- Console shortcut buttons come from `ConsoleCommands.ini` (`src/settings_menu/ConsoleShortcuts.h` parses it), read only on entering the Console tab and on Reload, never per frame.
+- With `Flying_BRICKS.esp` loaded, the Spawner's All ammo source lists only the playable rounds that plugin defines or overrides (`src/settings_menu/SpawnBrowser.cpp`); otherwise every named ammo form.
+
 ## Invariants
 
 - A consumer binds at runtime through `RPSUI_QueryInterfaceV1` and never links the plugin or copies its headers.
