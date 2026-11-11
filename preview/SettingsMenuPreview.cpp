@@ -268,6 +268,8 @@ namespace
         save("07-paper-bolt-appreciation.png");
         click(570.0f, 370.0f); // Bolt Appreciation: On
         save("07b-paper-bolt-appreciation-on-picked.png");
+        menu::previewShow("PAPER", "Reload");
+        save("07c-paper-reload.png");
         // With ROCK.toml's Developer Settings on, the ROCK Dev page joins the pages.
         {
             const auto rock = sandbox / "ROCK" / "ROCK.toml";
