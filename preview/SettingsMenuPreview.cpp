@@ -4,7 +4,7 @@
  * as RPS UI runs them in the headset.
  *
  * Settings live in "Settings sandbox" beside the exe, filled from the mods' example files
- * the first time. --settings <folder> copies that folder's files over the sandbox's first (a
+ * the first time and again whenever a mod's example changes. --settings <folder> copies that folder's files over the sandbox's first (a
  * Mods_Config folder works: each mod's file is looked up in its own subfolder); the folder
  * itself is only read. The preview reads and writes the sandbox as the game does its files.
  * Without ROCK running, ROCK's pages read ROCK's files.
@@ -118,15 +118,26 @@ namespace
     };
 
     // The sandbox, laid out as Mods_Config holds the files. A file from `source` (read only)
-    // replaces the sandbox's; a file still missing comes from the build's "examples".
+    // replaces the sandbox's; a file still missing comes from the build's "examples". The
+    // preview cannot reorganize a file as its mod does at startup, so when a mod's example
+    // has changed since the sandbox file was filled from it (its layout or options moved),
+    // the sandbox file is filled again; "examples" inside the sandbox keeps what it was
+    // filled from.
     [[nodiscard]] fs::path prepareSandbox(const fs::path& folder, const fs::path& source = {})
     {
         const auto examples = exeFolder() / "examples";
+        const auto filledFrom = folder / "examples";
         std::error_code error;
+        fs::create_directories(filledFrom, error);
         for (const auto& [example, mod, file] : { std::array<const char*, 3>{ "ROCK_example.toml", "ROCK", "ROCK.toml" },
                  std::array<const char*, 3>{ "ROCK_Developer_example.toml", "ROCK", "ROCK_Developer.toml" },
                  std::array<const char*, 3>{ "PAPER_example.toml", "PAPER", "PAPER.toml" } }) {
             const auto target = folder / mod / file;
+            const auto current = readFile(examples / example);
+            if (!current.empty() && readFile(filledFrom / example) != current) {
+                fs::remove(target, error);
+                fs::copy_file(examples / example, filledFrom / example, fs::copy_options::overwrite_existing, error);
+            }
             if (!source.empty()) {
                 for (const auto& from : { source / mod / file, source / file }) {
                     if (!fs::is_regular_file(from, error)) continue;
