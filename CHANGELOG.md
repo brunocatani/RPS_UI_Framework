@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-Built for ROCK 1.0 and the RobCo PALM, PAPER and SCISSORS versions released with it.
+Built for ROCK 1.0 and the RobCo PALM and PAPER versions released with it.
 Mods built for RPS UI Framework 1.1 must be updated: at the main menu an error
 box names each one, and the game closes when the box is closed.
 
