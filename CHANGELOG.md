@@ -10,8 +10,10 @@ box names each one, and the game closes when the box is closed.
 
 - **Themes.** Every mod's panels draw with one theme you choose in
   `Documents\My Games\Fallout4VR\Mods_Config\RPS_UI_Framework\RPS_UI.toml`.
-  Themes are files you can copy, edit and share; RobCo is the built-in
-  template. See `docs/Themes.md`.
+  Themes are files you can copy, edit and share. Built in: Pip-Boy (the
+  game's HUD green, the default), New Vegas (amber) and Vault-Tec (blue and
+  yellow), with rounded corners and slightly see-through panels; RobCo PALM's
+  Config picks one. See `docs/Themes.md`.
 - **Sharp panels at any size.** Each panel's resolution follows its size in the
   world and the `Sharpness` setting, with mipmaps, so enlarged panels are no
   longer blurry and small ones no longer shimmer.

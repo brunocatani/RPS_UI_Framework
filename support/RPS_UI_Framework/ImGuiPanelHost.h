@@ -187,7 +187,7 @@ namespace rpsui::imgui_host
         // faces are by FontRole and stay alive for the host's lifetime; an
         // empty face falls back as in the game.
         LocalPanelHost(ID3D11Device* device, ID3D11DeviceContext* context, const api::framework::PanelRegistration& panel,
-            const FaceSet& faces = {}, const api::framework::Theme& theme = theme_defaults::robco()) :
+            const FaceSet& faces = {}, const api::framework::Theme& theme = theme_defaults::defaultTheme()) :
             device_(device), context_(context), panel_(panel), theme_(theme)
         {
             imgui_ = ImGui::CreateContext();

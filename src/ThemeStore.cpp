@@ -27,16 +27,27 @@ namespace rpsui::theme_store
             return text;
         }
 
-        [[nodiscard]] std::vector<RPS::Settings::Definition> definitions()
+
+        // A theme file of a built-in name starts from that theme; any other name starts as a
+        // copy of the default theme.
+        [[nodiscard]] const defaults::BuiltInTheme& basisOf(std::string_view name) noexcept
+        {
+            const auto* builtIn = defaults::findBuiltIn(name);
+            return builtIn ? *builtIn : defaults::kBuiltIns[0];
+        }
+
+        [[nodiscard]] std::vector<RPS::Settings::Definition> definitions(const defaults::BuiltInTheme& basis)
         {
             using RPS::Settings::Group;
             using RPS::Settings::ValueType;
             std::vector<RPS::Settings::Definition> list;
-            for (const auto& entry : defaults::kColors) {
+            for (std::size_t i = 0; i < defaults::kColors.size(); ++i) {
+                const auto& entry = defaults::kColors[i];
                 list.push_back({ std::string(kColors), std::string(entry.key), "Colors",
                     std::format("{}\n\"#RRGGBB\" or \"#RRGGBBAA\"; AA is opacity.", entry.help), Group::Player,
-                    ValueType::String, std::string(entry.value) });
+                    ValueType::String, std::string(basis.colors[i]) });
             }
+
             for (const auto& entry : defaults::kFonts) {
                 list.push_back({ std::string(kFonts), std::string(entry.key), "Fonts",
                     std::format("{}\nA .ttf or .otf file in the Fonts folder beside Themes, or one Windows has.", entry.help),
@@ -155,18 +166,24 @@ namespace rpsui::theme_store
         [[nodiscard]] std::shared_ptr<const ThemeData> fromStore(const RPS::Settings::Store& store,
             const std::filesystem::path& configDirectory, std::string_view name, std::uint64_t revision)
         {
+
             auto data = std::make_shared<ThemeData>();
-            data->theme = defaults::robco();
+            const auto& basis = basisOf(name);
+            data->theme = defaults::builtIn(basis);
             data->theme.revision = revision;
             std::memset(data->theme.name, 0, sizeof(data->theme.name));
+
             std::memcpy(data->theme.name, name.data(), std::min(name.size(), sizeof(data->theme.name) - 1));
             data->file = store.path(RPS::Settings::Group::Player);
-            for (const auto& entry : defaults::kColors) {
+
+            for (std::size_t i = 0; i < defaults::kColors.size(); ++i) {
+                const auto& entry = defaults::kColors[i];
                 const auto* setting = store.find(kColors, entry.key);
                 if (setting && !defaults::parseColor(setting->value, data->theme.*entry.member))
                     log::warn("RPS UI theme '{}': Colors.{} = \"{}\" is not \"#RRGGBB\" or \"#RRGGBBAA\"; using {}", name,
-                        entry.key, setting->value, entry.value);
+                        entry.key, setting->value, basis.colors[i]);
             }
+
             for (const auto& entry : defaults::kMetrics) {
                 const auto* setting = store.find(kMetrics, entry.key);
                 if (!setting) continue;
@@ -199,7 +216,7 @@ namespace rpsui::theme_store
                 .modName = std::format("RPS UI theme {}", name),
                 .playerFileName = std::format("{}.toml", name),
                 .playerHeader = header(name),
-            }, definitions());
+            }, definitions(basisOf(name)));
         }
     }
 
@@ -214,7 +231,7 @@ namespace rpsui::theme_store
     std::shared_ptr<const ThemeData> builtIn(const std::filesystem::path& configDirectory, std::uint64_t revision)
     {
         auto data = std::make_shared<ThemeData>();
-        data->theme = defaults::robco();
+        data->theme = defaults::defaultTheme();
         data->theme.revision = revision;
         std::array<std::string, api::framework::kFontRoleCount> files{};
         for (std::size_t role = 0; role < files.size(); ++role) files[role] = std::string(defaults::kFonts[role].file);
@@ -226,16 +243,24 @@ namespace rpsui::theme_store
         std::uint64_t revision)
     {
         try {
-            // The template players copy is always there, whichever theme is in use.
-            auto robco = openStore(configDirectory, defaults::kName);
-            robco->load(true);
+
             if (!validName(name)) {
-                log::warn("RPS UI theme name '{}' may hold only letters, digits, spaces, '-', '_' and '.'; using {}", name,
-                    defaults::kName);
+                log::warn("RPS UI theme name '{}' may hold only letters, digits, spaces, '-', '_' and '.'; using {}",
+                    name, defaults::kName);
                 name = defaults::kName;
             }
-            auto store = name == defaults::kName ? std::move(robco) : openStore(configDirectory, name);
-            if (name != defaults::kName) store->load(true);
+            // Every built-in theme is always there as a file, so a player can pick one or copy it.
+            std::unique_ptr<RPS::Settings::Store> store;
+            for (const auto& builtIn : defaults::kBuiltIns) {
+                auto file = openStore(configDirectory, builtIn.name);
+                file->load(true);
+                if (builtIn.name == name) store = std::move(file);
+            }
+            if (!store) {
+                store = openStore(configDirectory, name);
+                store->load(true);
+            }
+
             for (const auto& message : store->messages()) log::warn("{}", message);
             auto data = fromStore(*store, configDirectory, name, revision);
             log::info("RPS UI theme '{}' loaded from {}", name, data->file.string());

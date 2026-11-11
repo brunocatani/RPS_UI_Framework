@@ -92,7 +92,7 @@ An ImGui context lives until the panel is unregistered or the device changes, so
 
 ### Themes
 
-Players choose how every panel looks: `Theme` in `RPS_UI.toml` names a file in `Mods_Config\RPS_UI_Framework\Themes\`, and the built-in `RobCo` theme is written there as the template ([guide](../Themes.md)). Before your setup callback, the host sets the context's ImGui style from the theme, so plain ImGui widgets follow it without any code of yours.
+Players choose how every panel looks: `Theme` in `RPS_UI.toml` names a file in `Mods_Config\RPS_UI_Framework\Themes\`, and the built-in themes (`Pip-Boy`, the default, `New Vegas` and `Vault-Tec`) are written there ([guide](../Themes.md)). Draw a chosen choice with `pushChosen` from `support/RPS_UI_Framework/ThemeStyle.h` (an accent tint, outline and text) so it matches every other panel, and keep the solid `Accent` fill for the page's main action. Before your setup callback, the host sets the context's ImGui style from the theme, so plain ImGui widgets follow it without any code of yours.
 
 `PanelSetup::theme` and `PanelDrawFrame::theme` point at the `Theme` record for the callback. Draw your own shapes with its roles instead of fixed colours:
 

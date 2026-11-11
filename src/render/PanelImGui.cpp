@@ -20,7 +20,7 @@ namespace rpsui::render::panel_imgui
         [[nodiscard]] const std::shared_ptr<const theme_store::ThemeData>& fallbackTheme() noexcept
         {
             static auto* value = new std::shared_ptr<const theme_store::ThemeData>(
-                std::make_shared<theme_store::ThemeData>(theme_store::ThemeData{ .theme = theme_defaults::robco() }));
+                std::make_shared<theme_store::ThemeData>(theme_store::ThemeData{ .theme = theme_defaults::defaultTheme() }));
             return *value;
         }
 

@@ -17,6 +17,27 @@ namespace rpsui::imgui_host
         return { value.r, value.g, value.b, value.a * alpha };
     }
 
+    /*
+     * A chosen choice, drawn the same way on every panel: an accent tint, an accent
+     * outline and accent text. The solid accent fill stays for a page's one main action,
+     * so the next step always stands out. For buttons; pair with popChosen().
+     */
+    inline void pushChosen(const api::framework::Theme& theme) noexcept
+    {
+        ImGui::PushStyleColor(ImGuiCol_Button, color(theme.accent, 0.20f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, color(theme.accent, 0.28f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, color(theme.accent, 0.36f));
+        ImGui::PushStyleColor(ImGuiCol_Text, color(theme.accent));
+        ImGui::PushStyleColor(ImGuiCol_Border, color(theme.accent));
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, theme.borderWidth * 2.0f);
+    }
+
+    inline void popChosen() noexcept
+    {
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor(5);
+    }
+
     // The theme as ImGui's style, so plain widgets follow it. The context must
     // be current. A consumer's setup callback may adjust it afterwards.
     inline void applyTheme(const api::framework::Theme& theme) noexcept

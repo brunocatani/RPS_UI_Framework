@@ -1,12 +1,15 @@
 #pragma once
 
-// RPS UI's built-in theme, "RobCo": a terminal's phosphor green on dark ink.
-// The host writes it to Themes\RobCo.toml as the template for players' own
-// themes and falls back to it for anything a theme file lacks; desktop
-// previews and tests draw with it. Standard library only.
+// RPS UI's built-in themes, in the colours of Fallout's own screens: Pip-Boy
+// (the game's HUD green, the default), New Vegas (its amber) and Vault-Tec (blue
+// and yellow). The host writes each to Themes\<name>.toml, where players pick one
+// in RPS_UI.toml or copy one to make their own, and falls back to a theme's
+// built-in values for anything its file lacks; desktop previews and tests draw
+// with the default. Standard library only.
 
 #include <RPS_UI_Framework/Framework.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -14,36 +17,70 @@
 
 namespace rpsui::theme_defaults
 {
-    inline constexpr std::string_view kName = "RobCo";
-
-    // One theme colour: its file key, help line and "#RRGGBBAA" default.
+    // One theme colour: its file key, help line and the Theme member it fills.
     struct ColorEntry
     {
         std::string_view key;
         std::string_view help;
-        std::string_view value;
         api::framework::ThemeColor api::framework::Theme::* member;
     };
 
     inline constexpr std::array<ColorEntry, 17> kColors{ {
-        { "Background", "A panel's body.", "#051007FF", &api::framework::Theme::background },
-        { "Surface", "Idle controls, headers and rails.", "#7CF06C0D", &api::framework::Theme::surface },
-        { "Hover", "Under the pointer.", "#7CF06C29", &api::framework::Theme::hover },
-        { "Pressed", "While pressed or dragged.", "#7CF06C3D", &api::framework::Theme::pressed },
-        { "Selected", "The open page and the current choice.", "#7CF06C21", &api::framework::Theme::selected },
-        { "Border", "Control outlines.", "#7CF06C55", &api::framework::Theme::border },
-        { "Divider", "Rules and separators.", "#7CF06C2E", &api::framework::Theme::divider },
-        { "Text", "Text.", "#7CF06CFF", &api::framework::Theme::text },
-        { "TextMuted", "Help, units and secondary text.", "#7CF06CBF", &api::framework::Theme::textMuted },
-        { "TextDisabled", "Text of things that cannot be used now.", "#7CF06C73", &api::framework::Theme::textDisabled },
-        { "Accent", "Solid fills of chosen things, links and the cursor.", "#7CF06CFF", &api::framework::Theme::accent },
-        { "OnAccent", "Text and marks on an Accent fill.", "#051007FF", &api::framework::Theme::onAccent },
-        { "Focus", "The control the thumbstick adjusts.", "#7CF06CD1", &api::framework::Theme::focus },
-        { "Pending", "A change that is not saved yet.", "#F2B84BFF", &api::framework::Theme::pending },
-        { "Invalid", "A refused value and errors.", "#FF6E5EFF", &api::framework::Theme::invalid },
-        { "Success", "A finished action.", "#7CF06CFF", &api::framework::Theme::success },
-        { "Scrim", "Behind a dialog.", "#051007CC", &api::framework::Theme::scrim },
+        { "Background", "A panel's body.", &api::framework::Theme::background },
+        { "Surface", "Idle controls, headers and rails.", &api::framework::Theme::surface },
+        { "Hover", "Under the pointer.", &api::framework::Theme::hover },
+        { "Pressed", "While pressed or dragged.", &api::framework::Theme::pressed },
+        { "Selected", "The open page and the current choice.", &api::framework::Theme::selected },
+        { "Border", "Control outlines.", &api::framework::Theme::border },
+        { "Divider", "Rules and separators.", &api::framework::Theme::divider },
+        { "Text", "Text.", &api::framework::Theme::text },
+        { "TextMuted", "Help, units and secondary text.", &api::framework::Theme::textMuted },
+        { "TextDisabled", "Text of things that cannot be used now.", &api::framework::Theme::textDisabled },
+        { "Accent", "Chosen things, links and the cursor; the solid fill of a page's main action.", &api::framework::Theme::accent },
+        { "OnAccent", "Text and marks on an Accent fill.", &api::framework::Theme::onAccent },
+        { "Focus", "The control the thumbstick adjusts.", &api::framework::Theme::focus },
+        { "Pending", "A change that is not saved yet.", &api::framework::Theme::pending },
+        { "Invalid", "A refused value and errors.", &api::framework::Theme::invalid },
+        { "Success", "A finished action.", &api::framework::Theme::success },
+        { "Scrim", "Behind a dialog.", &api::framework::Theme::scrim },
     } };
+
+    // A built-in theme: its name (also its file name) and a "#RRGGBBAA" value per
+    // kColors entry, in that order. Bodies are slightly see-through, so the world
+    // shows behind a panel.
+    struct BuiltInTheme
+    {
+        std::string_view name;
+        std::array<std::string_view, kColors.size()> colors;
+    };
+
+    inline constexpr std::array<BuiltInTheme, 3> kBuiltIns{ {
+        // Fallout 4's default HUD and Pip-Boy green, #12FF15.
+        { "Pip-Boy",
+            { "#03140AD9", "#12FF1512", "#12FF152E", "#12FF1547", "#12FF1526", "#12FF1566", "#12FF1533", "#12FF15FF",
+                "#12FF15B8", "#12FF155C", "#12FF15FF", "#03140AFF", "#12FF15D1", "#FFB642FF", "#FF5A4AFF", "#12FF15FF",
+                "#03140ACC" } },
+        // Fallout: New Vegas's default HUD amber, #FFB642.
+        { "New Vegas",
+            { "#140D02D9", "#FFB64212", "#FFB6422E", "#FFB64247", "#FFB64226", "#FFB64266", "#FFB64233", "#FFB642FF",
+                "#FFB642B8", "#FFB6425C", "#FFB642FF", "#140D02FF", "#FFB642D1", "#FFF1C9FF", "#FF5A4AFF", "#FFB642FF",
+                "#140D02CC" } },
+        // Vault-Tec's navy and yellow.
+        { "Vault-Tec",
+            { "#0A1A33E6", "#E8EFF812", "#FFC72C2E", "#FFC72C47", "#FFC72C26", "#FFC72C66", "#E8EFF833", "#E8EFF8FF",
+                "#E8EFF8B8", "#E8EFF85C", "#FFC72CFF", "#0A1A33FF", "#FFC72CD1", "#FF9F43FF", "#FF6B5EFF", "#5FD38AFF",
+                "#0A1A33CC" } },
+    } };
+
+    // The default theme's name, the one RPS_UI.toml starts with.
+    inline constexpr std::string_view kName = kBuiltIns[0].name;
+
+    [[nodiscard]] constexpr const BuiltInTheme* findBuiltIn(std::string_view name) noexcept
+    {
+        for (const auto& theme : kBuiltIns)
+            if (theme.name == name) return &theme;
+        return nullptr;
+    }
 
     // One face: its file key, help line and default file. A file is looked
     // up in Mods_Config\RPS_UI_Framework\Fonts, then in Windows' fonts.
@@ -78,8 +115,8 @@ namespace rpsui::theme_defaults
         { "TargetHeight", "The least height of anything you press.", 40.0f, 24.0f, 96.0f, &api::framework::Theme::targetHeight },
         { "Padding", "Space inside controls.", 10.0f, 0.0f, 48.0f, &api::framework::Theme::padding },
         { "Spacing", "Space between controls.", 8.0f, 0.0f, 48.0f, &api::framework::Theme::spacing },
-        { "Rounding", "Corner radius of controls and windows.", 0.0f, 0.0f, 24.0f, &api::framework::Theme::rounding },
-        { "BorderWidth", "Outline width.", 1.0f, 0.0f, 4.0f, &api::framework::Theme::borderWidth },
+        { "Rounding", "Corner radius of controls and windows.", 8.0f, 0.0f, 24.0f, &api::framework::Theme::rounding },
+        { "BorderWidth", "Outline width.", 1.5f, 0.0f, 4.0f, &api::framework::Theme::borderWidth },
     } };
 
     // "#RRGGBB" or "#RRGGBBAA". False for anything else.
@@ -102,13 +139,15 @@ namespace rpsui::theme_defaults
         return true;
     }
 
-    [[nodiscard]] inline api::framework::Theme robco() noexcept
+    [[nodiscard]] inline api::framework::Theme builtIn(const BuiltInTheme& source) noexcept
     {
         api::framework::Theme theme{};
         theme.revision = 1;
-        std::memcpy(theme.name, kName.data(), kName.size());
-        for (const auto& entry : kColors) (void)parseColor(entry.value, theme.*entry.member);
+        std::memcpy(theme.name, source.name.data(), std::min(source.name.size(), sizeof(theme.name) - 1));
+        for (std::size_t i = 0; i < kColors.size(); ++i) (void)parseColor(source.colors[i], theme.*kColors[i].member);
         for (const auto& entry : kMetrics) theme.*entry.member = entry.value;
         return theme;
     }
+
+    [[nodiscard]] inline api::framework::Theme defaultTheme() noexcept { return builtIn(kBuiltIns[0]); }
 }

@@ -22,8 +22,9 @@ namespace rpsui::settings
             return {
                 { std::string(kDisplay), "Theme", "Display",
                     "The theme every mod's panels draw with: a file in the Themes folder, without .toml.\n"
-                    "Copy RobCo.toml there under a new name to make your own; a name with no file starts as a\n"
-                    "copy of RobCo.",
+                    "Built in: Pip-Boy (the game's green), New Vegas (amber) and Vault-Tec (blue and yellow).\n"
+                    "Copy one of their files under a new name to make your own; a name with no file starts as a\n"
+                    "copy of Pip-Boy.",
                     RPS::Settings::Group::Player, RPS::Settings::ValueType::String, std::string(theme_defaults::kName) },
                 { std::string(kDisplay), "Sharpness", "Display",
                     "Texture pixels for each unit of a panel's layout, at the panel's default size.\n"

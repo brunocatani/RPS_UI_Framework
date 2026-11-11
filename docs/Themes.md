@@ -8,18 +8,26 @@ Themes are files in `Documents\My Games\Fallout4VR\Mods_Config\RPS_UI_Framework\
 
 ```toml
 [Display]
-Theme = "RobCo"
+Theme = "Pip-Boy"
 ```
 
-`RobCo` is the built-in theme: a terminal's phosphor green on dark ink. RPS UI writes `RobCo.toml` into `Themes` as the template, and puts back any key it lacks.
+Three themes are built in, in the colours of Fallout's own screens, with rounded corners and slightly see-through panels:
+
+| Theme | Look |
+| --- | --- |
+| `Pip-Boy` (default) | Fallout 4's HUD and Pip-Boy green, `#12FF15`, on dark green |
+| `New Vegas` | Fallout: New Vegas's HUD amber, `#FFB642`, on dark brown |
+| `Vault-Tec` | Vault-Tec yellow on navy, with white text |
+
+RPS UI writes each into `Themes` and puts back any key a file lacks. RobCo PALM's Config (RPS UI page, Theme) switches between them and any theme you add.
 
 ## Making a theme
 
-1. Copy `RobCo.toml` under a new name, for example `Amber.toml`.
+1. Copy one of the built-in files under a new name, for example `Amber.toml`.
 2. Set `Theme = "Amber"` in `RPS_UI.toml`.
 3. Edit `Amber.toml`. Each save shows in the headset within a second.
 
-A name may hold letters, digits, spaces, `-`, `_` and `.`. Naming a theme that has no file yet creates it as a copy of `RobCo`.
+A name may hold letters, digits, spaces, `-`, `_` and `.`. Naming a theme that has no file yet creates it as a copy of `Pip-Boy`.
 
 ### Colours
 
@@ -34,14 +42,14 @@ Colours are `"#RRGGBB"` or `"#RRGGBBAA"`, where `AA` is opacity (`FF` solid, `00
 | `Selected` | The open page and the current choice |
 | `Border`, `Divider` | Control outlines; rules and separators |
 | `Text`, `TextMuted`, `TextDisabled` | Text; help and secondary text; text of things that cannot be used now |
-| `Accent`, `OnAccent` | Solid fills of chosen things; text and marks on them |
+| `Accent`, `OnAccent` | Chosen things (as a tint, outline and text) and the solid fill of a page's main action; text and marks on that fill |
 | `Focus` | The control the thumbstick adjusts |
 | `Pending` | A change that is not saved yet |
 | `Invalid` | A refused value and errors |
 | `Success` | A finished action |
 | `Scrim` | Behind a dialog |
 
-`Surface`, `Hover`, `Pressed` and `Selected` read best as a see-through tint of `Accent` over `Background`, as `RobCo` does.
+`Surface`, `Hover`, `Pressed` and `Selected` read best as a see-through tint of `Accent` over `Background`, as the built-in themes do.
 
 When text would be hard to read, RPS UI writes a warning to `RPS_UI_Framework.log` with the pair and its contrast: `Text` needs 4.5:1 against `Background`, `TextMuted`, `Pending` and `Invalid` 3:1, and `OnAccent` 4.5:1 against `Accent`. A see-through `Background` is checked against both a black and a white world behind it.
 
