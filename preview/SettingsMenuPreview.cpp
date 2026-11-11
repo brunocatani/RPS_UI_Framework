@@ -233,21 +233,41 @@ namespace
             settle();
             writePng(target, folder / name);
         };
+        // A trigger pull at a point of the menu, as a player's pointer makes it: hover, press, release.
+        const auto click = [&](float x, float y) {
+            for (const bool down : { false, true, false }) {
+                rpsui::imgui_host::PanelInput input{};
+                input.pointerValid = true;
+                input.pointerX = x;
+                input.pointerY = y;
+                input.primaryDown = down;
+                host.frame(target.view.Get(), input);
+                menu::drainPreviewActions();
+            }
+        };
         menu::previewShow("ROCK", "Grabbing");
         save("01-rock-grabbing.png");
+        click(1140.0f, 400.0f); // Fingers (Alyx Style)
+        save("01b-rock-grabbing-fingers-picked.png");
         menu::previewShow("ROCK", "Prompts");
         save("02-rock-prompts.png");
         menu::previewShow("ROCK", "Weapon Handling");
         save("03-rock-weapon-handling.png");
+        click(570.0f, 378.0f); // Gunstock Mode: On
+        save("03b-rock-gunstock-on-picked.png");
         menu::previewOpenFineTuning(true);
         save("04-rock-weapon-handling-fine-tuning.png");
         menu::previewOpenFineTuning(false);
         menu::previewShow("ROCK", "Recoil");
         save("05-rock-recoil.png");
+        click(850.0f, 477.0f); // the Fine-tuning fold
+        save("05b-rock-recoil-fine-tuning-opened.png");
         menu::previewShow("ROCK", "Developer");
         save("06-rock-developer-switch.png");
         menu::previewShow("PAPER", "Bolt");
         save("07-paper-bolt-appreciation.png");
+        click(570.0f, 370.0f); // Bolt Appreciation: On
+        save("07b-paper-bolt-appreciation-on-picked.png");
         // With ROCK.toml's Developer Settings on, the ROCK Dev page joins the pages.
         {
             const auto rock = sandbox / "ROCK" / "ROCK.toml";

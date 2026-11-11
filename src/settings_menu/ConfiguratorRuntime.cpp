@@ -1142,7 +1142,10 @@ namespace rpsui::settings_menu
             draw->PushClipRect({windowPosition.x + 12, windowPosition.y}, {windowPosition.x + controlsStart - 14, windowPosition.y + rowHeight}, true);
             {
                 ScopedFont font(devui::render::FontRole::Body, 18);
-                ImGui::TextColored(mutedColor(0.85f), "%s", setting.description.empty() ? setting.section.c_str() : setting.description.c_str());
+                // The setting's own line, without its title or a group heading; the tooltip has the rest.
+                const auto summary = setting_help::summary(setting.helpLines);
+                if (!summary.empty()) ImGui::TextColored(mutedColor(0.85f), "%.*s", static_cast<int>(summary.size()), summary.data());
+                else ImGui::TextColored(mutedColor(0.85f), "%s", setting.description.empty() ? setting.section.c_str() : setting.description.c_str());
             }
 
             draw->PopClipRect();
