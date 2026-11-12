@@ -9,7 +9,7 @@ set(SOURCE_DIR "${ROOT_DIR}/src")
 set(PUBLIC_INCLUDE_DIR "${ROOT_DIR}/include")
 get_filename_component(WORKSPACE_ROOT "${ROOT_DIR}/../.." ABSOLUTE)
 # RPS Framework's staged package: RPS_UI.toml (RPS::Settings) and the
-# header-only required-update stop (RPS/Runtime/RequiredUpdate.h).
+# header-only caller naming for refusal logs (RPS/Runtime/CallerModule.h).
 set(RPSFramework_DIR "${WORKSPACE_ROOT}/PROJECT_ROCK_V2/my_frameworks_and_sdks/RPS_Framework/build-fast/stage/lib/cmake/RPSFramework"
   CACHE PATH "RPS Framework staged package")
 

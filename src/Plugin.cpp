@@ -4,7 +4,6 @@
 #include "InputService.h"
 #include "KeyboardCapture.h"
 #include "Logger.h"
-#include "RequiredUpdates.h"
 #include "SettingsMenuHost.h"
 #include "UiSettings.h"
 #include "render/PanelImGui.h"
@@ -112,10 +111,6 @@ namespace
         }
 
         reportRuntimeModules();
-        // Before any early return below: a version mismatch stops the game even
-        // when the host itself cannot start.
-        rpsui::required_updates::watch();
-
         // Read here: panel contexts are built on the render thread, which
         // never does file I/O.
         rpsui::settings::start();

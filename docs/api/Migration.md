@@ -6,8 +6,8 @@ framework (`RPSUIFrameworkApi.h`, export `RPSUI_RequestApi`), cooperation
 (`RPSUIInputApi.h`, `RPSUI_RequestInputApi`). Version 2.0 publishes nine
 interfaces at major 2 from this repository's `include/RPS_UI_Framework/`,
 found through `RPSUI_QueryInterfaceV1`. The old exports stay only to refuse:
-they return no table, and RPS UI stops the game at the main menu with an error
-box naming the mod that called them. A mod built against the SDK headers has
+they return no table, and RPS UI names the mod that called them in
+`RPS_UI_Framework.log`. A mod built against the SDK headers has
 to be rebuilt with the changes on this page.
 
 The largest change is drawing. In 1.1 your mod ran its own Dear ImGui context
@@ -52,7 +52,7 @@ if (rpsui::api::acquire(query, framework) != rpsui::api::Result::Ok) {
 ```
 
 `acquire` requests exactly the major, minor and table size your headers
-declare. Never probe with trial queries: every refused query stops the game.
+declare. Never probe with trial queries: every refused query is logged as a mismatch.
 Feature negotiation is gone: `FeatureV1`, `requestedFeatures`,
 `grantedFeatures`, the table's `apiFlavor` and `featureBits` are removed.
 Every table function is set.
@@ -96,7 +96,7 @@ What to change in your drawing code:
    [Framework](Framework.md#building-dear-imgui), with
    `IMGUI_USER_CONFIG="RPS_UI_Framework/ImGuiBuild.h"` and without the DX11
    backend. `registerPanel` refuses another build with `ImGuiBuildMismatch`,
-   which stops the game like an outdated mod.
+   which is logged like an outdated mod.
 3. Expand `RPSUI_IMGUI_BUILD()` where you fill `PanelRegistration::imgui`, with
    `<imgui.h>` and `<imgui_internal.h>` included there.
 4. Start both callbacks with `RPSUI_IMGUI_BIND(frame->imgui)` (or
@@ -156,6 +156,6 @@ These did not exist in 1.1. See their pages if you need them:
 2. Search your source for leftovers: `rpsui::sdk`, `RPSUI_Request`,
    `structSize`, `apiVersion`, `renderCallback`, `renderTargetView`,
    `ImGui_ImplDX11`, `ImGui::CreateContext`, `backDown`.
-3. Start the game with RPS UI Framework 2.0. No error box appears at the main
-   menu, `RPS_UI_Framework.log` names no refusal for your DLL, and your panels
+3. Start the game with RPS UI Framework 2.0. `RPS_UI_Framework.log` names no
+   refusal for your DLL, and your panels
    draw with the player's theme.

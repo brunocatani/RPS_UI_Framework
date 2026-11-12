@@ -1,8 +1,8 @@
 #pragma once
 
-// A consumer built for another RPS UI API version is never left running with
-// its UI silently off: discovery reports it and the game stops at the main menu
-// with an error box naming the DLL to update (RPS/Runtime/RequiredUpdate.h).
+// A consumer built for another RPS UI API version is refused and logged once,
+// naming the DLL to update; it keeps running without RPS UI and the game is
+// never stopped.
 
 #include <RPS_UI_Framework/Abi.h>
 
@@ -23,7 +23,4 @@ namespace rpsui::required_updates
     // host's (framework::ImGuiBuild): its panel would draw into a context its
     // code cannot read safely, so it is refused like an outdated consumer.
     void noteImGuiBuildMismatch(const char* panelId, const void* callerAddress) noexcept;
-
-    // Once, from the F4SE GameDataReady message.
-    void watch() noexcept;
 }

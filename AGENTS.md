@@ -45,11 +45,11 @@ Each mod owns its settings and their files; the settings menu only shows and edi
 
 - A consumer binds at runtime through `RPSUI_QueryInterfaceV1` and never links the plugin or copies its headers.
 - Each interface header declares `kMajor` and `kMinor`, and each interface has one page in `docs/api/`.
-- Every version refusal and retired-export call is logged with the calling DLL and stops the game at the main menu with an error box (`src/RequiredUpdates.cpp`).
+- Every version refusal and retired-export call is logged once with the calling DLL; the game keeps running (`src/RequiredUpdates.cpp`).
 - Native controller input works without ROCK or a skeleton provider.
 - Input yields while Mods Config FO4 VR's menu is open (`src/ModsConfigMenu.cpp`, read through its public `getMenuState`). Both mods hide controller buttons from every other reader of the shared IVRSystem vtable, so only one of them may take input at a time. Its hooks of the same call sites (main tick, scene-depth commit, controller polls, window procedure) chain with ours in either load order; keep every hook here chaining onto a foreign detour rather than refusing it.
 - Keyboard capture (`src/KeyboardCapture.cpp`) changes no engine state: it withholds raw key presses and `WM_CHAR` from the game window while held. Key releases always pass, or a key would stay held in the game's key table.
 - The settings holotape opens the menu through `TESEquipEvent`, registered through FO4VR's equip-sink function at RVA 0x41E090 after a live byte check; a mismatch leaves the holotape inert and logged.
 - The desktop preview never writes a mod's settings: only the stores of its own sandbox save.
 - Screen-positioned drawing does not exist. World drawing is anchored to world points, and text is projected per eye.
-- The host owns every panel's Dear ImGui context, renderer, input feeding, frame, texture resolution and theme; a consumer never receives a render target or device context, and declares only its layout size. A consumer's Dear ImGui build must match the host's (`ImGuiBuild.h`), or its panel is refused and the game stops at the main menu.
+- The host owns every panel's Dear ImGui context, renderer, input feeding, frame, texture resolution and theme; a consumer never receives a render target or device context, and declares only its layout size. A consumer's Dear ImGui build must match the host's (`ImGuiBuild.h`), or its panel is refused and the refusal is logged.

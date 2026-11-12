@@ -64,7 +64,7 @@ target_compile_definitions(my_imgui PUBLIC IMGUI_USER_CONFIG="RPS_UI_Framework/I
 
 Leave out the DX11 backend: the host renders. If you need more configuration, include `RPS_UI_Framework/ImGuiBuild.h` first from your own user configuration file. Nothing that changes ImGui's data layout may differ.
 
-`registerPanel` compares `PanelRegistration::imgui` with the host's build and refuses another one with `ImGuiBuildMismatch`. The refusal is logged with your DLL and stops the game at the main menu, like an outdated consumer.
+`registerPanel` compares `PanelRegistration::imgui` with the host's build and refuses another one with `ImGuiBuildMismatch`. The refusal is logged with your DLL, like an outdated consumer.
 
 ### Callbacks
 

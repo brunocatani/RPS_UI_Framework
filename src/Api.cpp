@@ -49,7 +49,7 @@ namespace
         return result;
     }
 
-    // A refused Dear ImGui build stops the game like an outdated consumer.
+    // A refused Dear ImGui build is logged like an outdated consumer.
     Result notePanelRegistration(Result result, const framework::PanelRegistration& registration,
         const void* callerAddress) noexcept
     {
@@ -317,7 +317,7 @@ extern "C" DLLEXPORT rpsui::api::Result RPSUI_CALL RPSUI_QueryInterfaceV1(const 
 }
 
 // Retired pre-2.0 exports. They stay exported so a mod still built against them
-// is named in the required-update stop instead of failing on a missing symbol;
+// is named in RPS_UI_Framework.log instead of failing on a missing symbol;
 // each returns no table. Their names are never reused.
 extern "C" DLLEXPORT const void* RPSUI_CALL RPSUI_RequestApi(std::uint32_t) noexcept
 {

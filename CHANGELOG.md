@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- A mod built for another RPS UI Framework version no longer closes the game. RPS UI
+  refuses it and names it in `RPS_UI_Framework.log`; the game keeps running without
+  that mod's RPS UI features. No error box appears at the main menu.
+
 ## 2.0.0
 
 Built for ROCK 1.0.0, RobCo PALM 2.0.0 and PAPER 2.0.0.

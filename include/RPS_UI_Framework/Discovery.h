@@ -4,7 +4,7 @@
 // Resolve kQueryExportName from the loaded kModuleName and ask for an interface
 // by ID, exact major, minimum minor and minimum table size. A major this RPS UI
 // does not serve returns UnsupportedMajor and no table; RPS UI logs the refusal
-// and names the calling DLL in an error box at the main menu.
+// with the calling DLL.
 // The pre-2.0 exports (RPSUI_RequestApi, RPSUI_RequestCooperationApi,
 // RPSUI_RequestFocusedPanelApi, RPSUI_RequestInputApi,
 // RPSUI_RequestNumberOverlayApi, RPSUI_RequestPassivePanelApi,
