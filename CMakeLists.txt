@@ -59,6 +59,11 @@ set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_DEBUG OFF)
 add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 
+# The host compiles its own Dear ImGui (rpsui_imgui below); a second copy from
+# the framework's ImGui layer would collide at link time. The framework's Tracy
+# configuration downloads Tracy at configure time and is not used here.
+set(F4CF_WITH_IMGUI_UI OFF CACHE BOOL "" FORCE)
+set(F4CF_WITH_TRACY OFF CACHE BOOL "" FORCE)
 add_subdirectory(
   "${F4VR_COMMON_FRAMEWORK_PATH}"
   "F4VR-CommonFramework"
