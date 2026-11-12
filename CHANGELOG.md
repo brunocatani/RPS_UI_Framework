@@ -7,6 +7,14 @@
 - A mod built for another RPS UI Framework version no longer closes the game. RPS UI
   refuses it and names it in `RPS_UI_Framework.log`; the game keeps running without
   that mod's RPS UI features. No error box appears at the main menu.
+- `RPS_UI_Framework.esp` is ESL-flagged and no longer takes a load-order slot. Its
+  file name and form IDs are unchanged.
+
+### Fixed
+
+- RPS UI hands the controllers back to the game while the dialogue menu or the
+  lockpicking menu is open. Before, those two menus were looked up under the wrong
+  names, so PALM and RPS UI panels stayed live during conversations and lockpicking.
 
 ## 2.0.0
 

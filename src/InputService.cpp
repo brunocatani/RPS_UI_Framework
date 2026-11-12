@@ -137,7 +137,7 @@ bool installPolling() {
 }
 bool blockedMenu() {
  auto* ui=RE::UI::GetSingleton();if(!ui)return true;
- static const std::array<RE::BSFixedString,13> names{"MainMenu","LoadingMenu","PipboyMenu","PauseMenu","Console","FavoritesMenu","ContainerMenu","BarterMenu","Crafting Menu","Dialogue Menu","MessageBoxMenu","Lockpicking Menu","WorkshopMenu"};
+ static const std::array<RE::BSFixedString,13> names{"MainMenu","LoadingMenu","PipboyMenu","PauseMenu","Console","FavoritesMenu","ContainerMenu","BarterMenu","Crafting Menu","DialogueMenu","MessageBoxMenu","LockpickingMenu","WorkshopMenu"};
  for(const auto& name:names)if(ui->GetMenuOpen(name))return true;
  return false;
 }
