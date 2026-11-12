@@ -3,7 +3,7 @@
 RPS UI Framework 1.1 published three tables through the RPS SDK: the panel
 framework (`RPSUIFrameworkApi.h`, export `RPSUI_RequestApi`), cooperation
 (`RPSUICooperationApi.h`, `RPSUI_RequestCooperationApi`) and input
-(`RPSUIInputApi.h`, `RPSUI_RequestInputApi`). Version 2.0 publishes eight
+(`RPSUIInputApi.h`, `RPSUI_RequestInputApi`). Version 2.0 publishes nine
 interfaces at major 2 from this repository's `include/RPS_UI_Framework/`,
 found through `RPSUI_QueryInterfaceV1`. The old exports stay only to refuse:
 they return no table, and RPS UI stops the game at the main menu with an error
@@ -146,6 +146,8 @@ These did not exist in 1.1. See their pages if you need them:
 - [FocusedPanel](FocusedPanel.md): fixed-size panels that take input only
   while pointed at.
 - [Registry](Registry.md): a paged census of consumers and panels.
+- [SettingsMenu](SettingsMenu.md): open RPS UI's settings menu and add up to
+  eight pages of your own to it.
 
 ## 8. Check the result
 
