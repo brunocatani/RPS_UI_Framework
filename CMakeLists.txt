@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 4.2)
 
 set(NAME "RPS_UI_Framework")
 set(FRIENDLY_NAME "RPS UI Framework")
-set(VERSION 1.1.1)
+set(VERSION 2.0.0)
 set(ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(SOURCE_DIR "${ROOT_DIR}/src")
 # RPS UI's own provider API: self-contained headers the DLL compiles against.
@@ -54,7 +54,7 @@ endif()
 set(COMMON_LIB_F4VR_PATH
   "${COMMON_LIB_F4VR_PATH}" CACHE PATH "" FORCE)
 
-project(${NAME} VERSION ${VERSION} LANGUAGES CXX)
+project(${NAME} VERSION ${VERSION} LANGUAGES CXX RC)
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_DEBUG OFF)
 add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
@@ -140,10 +140,12 @@ target_sources(rpsui_settings_menu PRIVATE src/settings_menu/render/FrameworkPan
 target_link_libraries(rpsui_settings_menu PUBLIC F4VRCommon::framework)
 target_compile_definitions(rpsui_settings_menu_preview PUBLIC RPSUI_SETTINGS_MENU_PREVIEW)
 
+configure_file(cmake/version.rc.in version.rc @ONLY)
 add_library(${PROJECT_NAME} SHARED
   ${headers}
   ${sources}
-  src/exports.def)
+  src/exports.def
+  "${CMAKE_CURRENT_BINARY_DIR}/version.rc")
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_23)
 target_compile_definitions(${PROJECT_NAME} PRIVATE
   UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX NOMMNOSOUND)
