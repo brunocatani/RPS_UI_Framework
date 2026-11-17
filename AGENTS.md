@@ -1,6 +1,6 @@
 # RPS UI Framework
 
-Shared world-space UI and VR controller interaction for Fallout 4 VR. It hosts world panels and draws them with Dear ImGui, owns all world drawing (gameplay indicators and debug shapes) and publishes controller input. It owns one menu, the settings menu: every RPS mod's settings pages, the Spawner and the Console, opened from its holotape or by a mod such as RobCo PALM.
+Shared world-space UI and VR controller interaction for Fallout 4 VR. It hosts world panels and draws them with Dear ImGui, owns world overlay drawing (gameplay indicators and debug shapes, drawn over the lit scene; it does not paint scene surfaces) and publishes controller input. It owns one menu, the settings menu: every RPS mod's settings pages, the Spawner and the Console, opened from its holotape or by a mod such as RobCo PALM.
 
 ## Layout
 
