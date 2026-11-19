@@ -53,7 +53,7 @@ int main(int argc,char** argv) {
     const auto visualizerIndex=indexOf(developer,"DebugShowColliders");
     const auto collision=consumer.setBooleanByIndex(collisionIndex,false);assert(collision.changed&&collision.saved);
     const auto visualizer=developer.setBooleanByIndex(visualizerIndex,true);assert(visualizer.changed&&visualizer.saved);
-    const auto physical=developer.setBooleanByIndex(indexOf(developer,"PhysicalMelee"),false);assert(physical.changed&&physical.saved);
+    const auto physical=consumer.setBooleanByIndex(indexOf(consumer,"PhysicalMelee"),false);assert(physical.changed&&physical.saved);
     const auto hunchIndex=indexOf(developer,"RagdollHunch");
     const auto hunch=developer.setNumericByIndex(hunchIndex,2.5);assert(hunch.changed&&hunch.saved&&developer.settings()[hunchIndex].overridden);
     config::Snapshot state;assert(api->snapshot(&state)==config::Status::Ok);

@@ -32,7 +32,7 @@ Each mod owns its settings and their files; the settings menu only shows and edi
 
 - Runtime availability comes from the loaded modules (`src/settings_menu/RpsMod.h`). The menu never changes a provider's published contract.
 - ROCK's consumer and developer pages share one configuration registration: read the catalog from ROCK's negotiated Configuration API and route writes to ROCK. PAPER's page edits `PAPER.toml` line by line through the file editor (`src/settings_menu/IniSettingsStore.cpp`), which reads TOML files as RPS Framework's settings store writes them (`## === ` category headings, `##` help, single-`#` player notes, quoted strings) and INI files; PAPER's watcher applies the edit.
-- SCISSORS pages (consumer and developer) bind only `SCISSORS.dll`'s `SCISSORS_GetConfiguration` 2.0 table, from SCISSORS' own `include/` (`SCISSORS_INCLUDE_DIR`). Never forward NPC settings through ROCK or write SCISSORS' settings files directly. `PhysicalMelee` lives on the SCISSORS Dev page and goes through SCISSORS Configuration, never ROCK configuration.
+- SCISSORS pages (consumer and developer) bind only `SCISSORS.dll`'s `SCISSORS_GetConfiguration` 2.0 table, from SCISSORS' own `include/` (`SCISSORS_INCLUDE_DIR`). Never forward NPC settings through ROCK or write SCISSORS' settings files directly. `PhysicalMelee` lives on the SCISSORS page and goes through SCISSORS Configuration, never ROCK configuration.
 - The RPS UI page edits `RPS_UI.toml` through the same file editor; its Theme dropdown lists the files in the `Themes` folder beside it.
 - Preview builds never discover or write a real provider, and injected fixtures stay read-only.
 
