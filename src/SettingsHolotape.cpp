@@ -49,6 +49,25 @@ namespace rpsui::settings_holotape
             return value;
         }
 
+        // The plugin is ESL-flagged. CommonLib's LookupForm reads a compiled file collection that
+        // this VR stack's light-plugin loader does not publish, so it never finds a light plugin's
+        // form; the file's own compile indices give the runtime ID for a light or a full load.
+        [[nodiscard]] RE::TESForm* lookupHolotape(RE::TESDataHandler& data) noexcept
+        {
+            constexpr std::uint8_t kNotLoaded = 0xFF;
+            constexpr std::uint8_t kLightSlot = 0xFE;
+            for (const auto* file : data.files) {
+                if (!file || file->GetCompileIndex() == kNotLoaded || _stricmp(file->filename, kPluginFile.data()) != 0) {
+                    continue;
+                }
+                const auto index = static_cast<std::uint32_t>(file->GetCompileIndex());
+                const auto id = index == kLightSlot ? (index << 24) | (static_cast<std::uint32_t>(file->GetSmallFileCompileIndex()) << 12) | kHolotapeLocalId :
+                                                      (index << 24) | kHolotapeLocalId;
+                return RE::TESForm::GetFormByID(id);
+            }
+            return nullptr;
+        }
+
         [[nodiscard]] RE::TESBoundObject* holotape() noexcept
         {
             const auto id = s_holotape.load(std::memory_order_acquire);
@@ -65,7 +84,7 @@ namespace rpsui::settings_holotape
         }
         registered = true;
         auto* data = RE::TESDataHandler::GetSingleton();
-        auto* form = data ? data->LookupForm(kHolotapeLocalId, kPluginFile) : nullptr;
+        auto* form = data ? lookupHolotape(*data) : nullptr;
         if (!form || form->GetFormType() != RE::ENUM_FORM_ID::kNOTE) {
             log::warn("Settings holotape unavailable: {} is not loaded or has no holotape {:03X}", kPluginFile, kHolotapeLocalId);
             return;

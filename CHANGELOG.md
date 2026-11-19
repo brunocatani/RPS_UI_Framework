@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- The settings menu is now the **ROCK Family Configurator**, and so is its holotape
+  (formerly **RPS UI Settings**). The holotape works with or without RobCo PALM;
+  PALM's Config opens the same menu.
+
+### Fixed
+
+- The holotape is back. Since `RPS_UI_Framework.esp` became ESL-flagged in 2.0.1,
+  RPS UI could not find it among light plugins, so no holotape was given and playing
+  an old one did nothing.
+
 ## 2.0.1
 
 ### Changed

@@ -2,7 +2,7 @@
 
 `SettingsMenu.h`, interface `SettingsMenu`, version 2.0.
 
-RPS UI's settings menu holds every RPS mod's settings pages, the Spawner and the Console on one panel. Players open it by playing the **RPS UI Settings** holotape in the Pip-Boy (`RPS_UI_Framework.esp` gives the player one whenever a game starts or loads without it). A mod can open it as well, as RobCo PALM's wheel does, and add pages of its own to the menu's top bar.
+RPS UI's settings menu, shown to players as the **ROCK Family Configurator**, holds every RPS mod's settings pages, the Spawner and the Console on one panel. Players open it by playing the **ROCK Family Configurator** holotape in the Pip-Boy (`RPS_UI_Framework.esp` gives the player one whenever a game starts or loads without it). A mod can open it as well, as RobCo PALM's wheel does, and add pages of its own to the menu's top bar.
 
 The table needs an owner token from `framework::Api::registerConsumer`.
 

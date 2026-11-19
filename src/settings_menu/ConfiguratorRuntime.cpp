@@ -954,9 +954,9 @@ namespace rpsui::settings_menu
             auto* draw = ImGui::GetWindowDrawList();
             draw->AddLine({p.x, p.y + 94}, {p.x + width, p.y + 94}, packed(mutedColor(0.24f)));
             ImGui::SetCursorPos({28, 15});
-            { ScopedFont font(devui::render::FontRole::Medium, 16); ImGui::TextColored(accentColor(), "RPS UI"); }
+            { ScopedFont font(devui::render::FontRole::Medium, 16); ImGui::TextColored(accentColor(), "ROCK Family"); }
             ImGui::SetCursorPos({28, 43});
-            { ScopedFont font(devui::render::FontRole::Heading, 30); ImGui::TextUnformatted("Settings"); }
+            { ScopedFont font(devui::render::FontRole::Heading, 30); ImGui::TextUnformatted("Configurator"); }
             const auto tabs = topBarTabs();
             const auto slots = topBarSlots(width, tabs);
             const auto page = s_externalPage.load(std::memory_order_acquire);

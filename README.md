@@ -9,11 +9,12 @@ It works alongside [Mods Config FO4 VR](https://github.com/ArthurHub/F4VR-Mods-C
 while that menu is open, the controllers belong to it and RPS UI panels take no
 input until it closes.
 
-## Settings menu
+## ROCK Family Configurator
 
-Play the **RPS UI Settings** holotape in your Pip-Boy (enable `RPS_UI_Framework.esp`;
-you get the holotape whenever a game starts or loads without one). When you close the
-Pip-Boy, the menu opens in front of you with:
+The settings menu of every RPS mod. Play the **ROCK Family Configurator** holotape in
+your Pip-Boy (enable `RPS_UI_Framework.esp`; you get the holotape whenever a game starts
+or loads without one, with or without RobCo PALM). When you close the Pip-Boy, the menu
+opens in front of you with:
 
 - **Settings** for ROCK, PAPER and the other RPS mods you have loaded. Each page starts
   with the main choices, named and explained in one line, as in ROCK's setup wizard;

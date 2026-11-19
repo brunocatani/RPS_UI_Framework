@@ -1,8 +1,9 @@
 #pragma once
 
 /*
- * The "RPS UI Settings" holotape (RPS_UI_Framework.esp, local form 0x800): the settings
- * menu's way in without a wheel. The player gets one whenever a session starts without it;
+ * The "ROCK Family Configurator" holotape (RPS_UI_Framework.esp, local form 0x800): the
+ * settings menu's way in from the Pip-Boy, with or without a wheel such as RobCo PALM's.
+ * The player gets one whenever a session starts without it;
  * playing it in the Pip-Boy opens the menu in front of the headset as soon as gameplay input
  * is back.
  *
