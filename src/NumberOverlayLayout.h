@@ -4,6 +4,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdint>
+#include <RPS_UI_Framework/NumberOverlay.h>
 
 namespace rpsui::number_overlay
 {
@@ -123,13 +124,44 @@ namespace rpsui::number_overlay
     };
     struct HudGlyph { float left{},top{},right{},bottom{},u0{},u1{},v0{},v1{}; };
     struct Bar { float left{},top{},right{},bottom{}; };
+
+    /*
+     * A label: one line of text the host renders into its own texture in the
+     * numbers' face at kLabelFontPixels. Metrics are in that texture's pixels:
+     * the text starts at left and advances advance; digitTop and digitBottom
+     * are the face's digit ink rows, so every label's digits take one height
+     * whatever letters it holds, and digitBottom is its baseline.
+     */
+    inline constexpr int kLabelFontPixels=176;
+    struct LabelMetrics { float width{},height{},left{},advance{},digitTop{},digitBottom{}; };
+    inline bool valid(const LabelMetrics& m) noexcept
+    {
+        return std::isfinite(m.width) && std::isfinite(m.height) && std::isfinite(m.left) && std::isfinite(m.advance) &&
+            std::isfinite(m.digitTop) && std::isfinite(m.digitBottom) && m.width>0 && m.height>0 && m.advance>0 &&
+            m.digitBottom>m.digitTop;
+    }
+    // The label texture's rect with its digits digitHeight tall, its text
+    // starting at x on baseline, shrunk so the text ends by maxRight.
+    inline Rect placeLabel(const LabelMetrics& m,float x,float baseline,float digitHeight,float maxRight) noexcept
+    {
+        float scale=digitHeight/(m.digitBottom-m.digitTop);
+        const float room=maxRight-x;
+        if (!(room>0) || !(scale>0)) return {};
+        if (m.advance*scale>room) scale=room/m.advance;
+        const float left=x-m.left*scale, top=baseline-m.digitBottom*scale;
+        return {left,top,left+m.width*scale,top+m.height*scale};
+    }
+
     struct HudLayout
     {
         std::array<HudGlyph,20> glyphs{};
         std::size_t glyphCount{};
         std::array<Bar,7> bars{};
         std::size_t barCount{};
-        Rect cartridge{}; // Set only with chamber; the height of the two rows.
+        // Set only with chamber: the height of the two rows, or of the first
+        // row when a label shares the column.
+        Rect cartridge{};
+        Rect label{}; // Set only with a label: its texture's rect.
     };
     inline constexpr float kHudDigitGap=0.30f, kHudDividerThickness=0.09f, kHudDividerLength=1.9f;
     inline constexpr float kHudBracketPadX=0.35f, kHudBracketPadY=0.28f, kHudBracketTick=0.32f;
@@ -137,7 +169,7 @@ namespace rpsui::number_overlay
     inline constexpr float kHudChamberGap=0.35f;
 
     inline HudLayout hudLayout(std::uint32_t top,std::uint32_t bottom,bool bracketed,
-        const HudAtlasMetrics& atlas,float width,float height,bool chamber=false) noexcept
+        const HudAtlasMetrics& atlas,float width,float height,bool chamber=false,const LabelMetrics* label=nullptr) noexcept
     {
         HudLayout result;
         const float inkHeight=atlas.inkBottom-atlas.inkTop;
@@ -150,6 +182,7 @@ namespace rpsui::number_overlay
         if (topEnd.ec!=std::errc{} || bottomEnd.ec!=std::errc{}) return result;
         const auto topCount=static_cast<std::size_t>(topEnd.ptr-topDigits.data());
         const auto bottomCount=static_cast<std::size_t>(bottomEnd.ptr-bottomDigits.data());
+        const bool labelled=label && valid(*label);
 
         // Everything below is in units of the digit height until scaled.
         const float advance=atlas.advance*kHudGlyphWidth/(inkHeight*kHudGlyphHeight);
@@ -157,10 +190,19 @@ namespace rpsui::number_overlay
         const float blockHeight=2.0f+2.0f*kHudDigitGap;
         const float padX=bracketed ? kHudBracketPadX : 0.0f;
         const float padY=bracketed ? kHudBracketPadY+kHudDividerThickness : 0.0f;
-        const float cartridgeWidth=chamber ? blockHeight/kCartridgeAspect : 0.0f;
-        const float chamberBlock=chamber ? kHudChamberGap+cartridgeWidth : 0.0f;
-        const float contentWidth=blockWidth+chamberBlock+2.0f*padX, contentHeight=blockHeight+2.0f*padY;
-        const float h=(std::min)(height*kHudFill/contentHeight,width*kHudFill/contentWidth);
+        // The column right of the rows holds the cartridge, beside the first
+        // row only when the label takes the second.
+        const bool column=chamber || labelled;
+        const float cartridgeHeight=labelled ? 1.0f : blockHeight;
+        const float cartridgeWidth=chamber ? cartridgeHeight/kCartridgeAspect : 0.0f;
+        const float contentHeight=blockHeight+2.0f*padY;
+        // The numbers fit the panel as without a label; the label takes the width left.
+        const float fitWidth=blockWidth+(column ? kHudChamberGap+cartridgeWidth : 0.0f)+2.0f*padX;
+        const float h=(std::min)(height*kHudFill/contentHeight,width*kHudFill/fitWidth);
+        const float labelWidth=labelled ? label->advance*api::number_overlay::kLabelScale/(label->digitBottom-label->digitTop) : 0.0f;
+        const float labelRoom=(std::max)(0.0f,width*kHudFill/h-(blockWidth+kHudChamberGap+2.0f*padX));
+        const float columnWidth=(std::max)(cartridgeWidth,(std::min)(labelWidth,labelRoom));
+        const float contentWidth=blockWidth+(column ? kHudChamberGap+columnWidth : 0.0f)+2.0f*padX;
         const float originX=(width-contentWidth*h)*0.5f, originY=(height-contentHeight*h)*0.5f;
         const float right=originX+(padX+blockWidth)*h;
         const float blockTop=originY+padY*h;
@@ -179,10 +221,10 @@ namespace rpsui::number_overlay
         const float dividerCenter=blockTop+(1.0f+kHudDigitGap)*h;
         result.bars[result.barCount++]={right-kHudDividerLength*h,dividerCenter-kHudDividerThickness*h*0.5f,
             right,dividerCenter+kHudDividerThickness*h*0.5f};
-        if (chamber) {
-            const float left=right+kHudChamberGap*h;
-            result.cartridge={left,blockTop,left+cartridgeWidth*h,blockTop+blockHeight*h};
-        }
+        const float columnLeft=right+kHudChamberGap*h;
+        if (chamber) result.cartridge={columnLeft,blockTop,columnLeft+cartridgeWidth*h,blockTop+cartridgeHeight*h};
+        if (labelled) result.label=placeLabel(*label,columnLeft,blockTop+blockHeight*h,
+            api::number_overlay::kLabelScale*h,columnLeft+columnWidth*h+0.001f);
         if (bracketed) {
             const float left=originX, outerRight=originX+contentWidth*h;
             const float upper=originY, lower=originY+contentHeight*h;
@@ -194,6 +236,48 @@ namespace rpsui::number_overlay
             result.bars[result.barCount++]={left,lower-tick,left+stroke,lower};
             result.bars[result.barCount++]={outerRight-stroke,lower-tick,outerRight,lower};
         }
+        return result;
+    }
+
+    /*
+     * Plain with a label: the number in cells kPlainLabelNumberFill of the
+     * panel height, vertically centered and left aligned, then the cartridge
+     * in plainChamberLayout's proportions to the cells, then the label on the
+     * digits' baseline. ink: the digit atlas's ink rows, 0..1 of the cell.
+     */
+    struct InkRows { float top{},bottom{}; };
+    struct PlainLabelLayout { Layout digits{}; Rect cartridge{}; Rect label{}; };
+    inline constexpr float kPlainLabelChamberGap=0.125f, kPlainLabelGap=0.2f;
+    // plainChamberLayout's cartridge measured in cells of 0.85 of the panel height.
+    inline constexpr float kPlainCartridgeTop=(kPlainChamberTop-(1.0f-0.85f)*0.5f)/0.85f, kPlainCartridgeHeight=kPlainChamberHeight/0.85f;
+    inline PlainLabelLayout plainLabelLayout(std::uint32_t value,bool chamber,const InkRows& ink,
+        const LabelMetrics& label,float width,float height) noexcept
+    {
+        PlainLabelLayout result;
+        if (!std::isfinite(width) || !std::isfinite(height) || width<=0 || height<=0 ||
+            !std::isfinite(ink.top) || !std::isfinite(ink.bottom) || ink.top<0 || ink.bottom>1 || ink.bottom<=ink.top ||
+            !valid(label)) return result;
+        std::array<char,10> digits{};
+        const auto converted=std::to_chars(digits.data(),digits.data()+digits.size(),value);
+        if (converted.ec!=std::errc{}) return result;
+        const auto count=static_cast<std::size_t>(converted.ptr-digits.data());
+        const float cell=(std::min)(height*api::number_overlay::kPlainLabelNumberFill,
+            width*0.9f/static_cast<float>(count)*kGlyphHeight/kGlyphWidth);
+        const float glyphWidth=cell*kGlyphWidth/kGlyphHeight, top=(height-cell)*0.5f;
+        float x=0;
+        for (std::size_t i=0;i<count;++i,x+=glyphWidth) {
+            const float digit=static_cast<float>(digits[i]-'0');
+            result.digits.glyphs[i]={x,top,x+glyphWidth,top+cell,digit/kGlyphCount,(digit+1)/kGlyphCount};
+        }
+        result.digits.count=count;
+        if (chamber) {
+            x+=kPlainLabelChamberGap*cell;
+            const float cartridgeHeight=kPlainCartridgeHeight*cell, cartridgeTop=top+kPlainCartridgeTop*cell;
+            result.cartridge={x,cartridgeTop,x+cartridgeHeight/kCartridgeAspect,cartridgeTop+cartridgeHeight};
+            x=result.cartridge.right;
+        }
+        x+=kPlainLabelGap*cell;
+        result.label=placeLabel(label,x,top+ink.bottom*cell,api::number_overlay::kLabelScale*(ink.bottom-ink.top)*cell,width);
         return result;
     }
 }

@@ -101,4 +101,57 @@ int main()
         }
     }
     assert(!cartridgeLayout({0,0,0,0},true).count);
+
+    // A label shares the chamber column: the cartridge beside the first row,
+    // the label beside the second on its baseline. The numbers keep the size
+    // they have without a label, and a long label shrinks alone to fit.
+    using rpsui::number_overlay::LabelMetrics;
+    const auto textEnd=[](const rpsui::number_overlay::Rect& r,const LabelMetrics& m) {
+        const float scale=(r.right-r.left)/m.width;
+        return r.left+(m.left+m.advance)*scale;
+    };
+    const auto textStart=[](const rpsui::number_overlay::Rect& r,const LabelMetrics& m) {
+        return r.left+m.left*(r.right-r.left)/m.width;
+    };
+    const auto baseline=[](const rpsui::number_overlay::Rect& r,const LabelMetrics& m) {
+        return r.top+m.digitBottom*(r.bottom-r.top)/m.height;
+    };
+    for (const float advance:{300.0f,812.0f,6000.0f}) {
+        const LabelMetrics label{advance+88,214,44,advance,40,166};
+        for (const bool bracketed:{false,true}) {
+            for (const bool chamber:{false,true}) {
+                const auto plain=hudLayout(30,240,bracketed,atlas,1024,480,chamber);
+                const auto hud=hudLayout(30,240,bracketed,atlas,1024,480,chamber,&label);
+                assert(hud.glyphCount==plain.glyphCount);
+                const float digit=hud.glyphs[0].bottom-hud.glyphs[0].top;
+                assert(std::abs(digit-(plain.glyphs[0].bottom-plain.glyphs[0].top))<0.01f);
+                const auto& divider=hud.bars[0];
+                const auto& last=hud.glyphs[hud.glyphCount-1];
+                assert(hud.label.right>hud.label.left && hud.label.bottom>hud.label.top);
+                assert(textStart(hud.label,label)>=divider.right && textEnd(hud.label,label)<=1024.01f);
+                assert(std::abs(baseline(hud.label,label)-last.bottom)<0.01f);
+                const float labelDigit=(label.digitBottom-label.digitTop)*(hud.label.bottom-hud.label.top)/label.height;
+                assert(labelDigit<=digit*rpsui::api::number_overlay::kLabelScale+0.01f);
+                if (advance<500) assert(std::abs(labelDigit-digit*rpsui::api::number_overlay::kLabelScale)<0.01f);
+                if (chamber) {
+                    inPanel(hud.cartridge);
+                    assert(hud.cartridge.bottom<=divider.top && hud.cartridge.left>=divider.right);
+                }
+                if (bracketed) assert(hud.bars[3].right>=textEnd(hud.label,label)-0.01f);
+            }
+        }
+        using rpsui::number_overlay::plainLabelLayout;
+        constexpr rpsui::number_overlay::InkRows ink{0.27f,0.81f};
+        for (const bool chamber:{false,true}) {
+            const auto plain=plainLabelLayout(120,chamber,ink,label,1024,480);
+            assert(plain.digits.count==3);
+            const auto& last=plain.digits.glyphs[2];
+            assert(std::abs((last.bottom-last.top)-480*rpsui::api::number_overlay::kPlainLabelNumberFill)<0.01f);
+            const float after=chamber ? plain.cartridge.right : last.right;
+            if (chamber) inPanel(plain.cartridge), assert(plain.cartridge.left>=last.right);
+            assert(textStart(plain.label,label)>=after && textEnd(plain.label,label)<=1024.01f);
+            assert(std::abs(baseline(plain.label,label)-(last.top+ink.bottom*(last.bottom-last.top)))<0.01f);
+        }
+    }
+    assert(!rpsui::number_overlay::plainLabelLayout(1,false,{0.27f,0.81f},{},1024,480).digits.count);
 }

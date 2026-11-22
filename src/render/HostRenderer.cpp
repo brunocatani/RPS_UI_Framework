@@ -34,6 +34,13 @@ namespace rpsui::render
             std::uint32_t width{ 0 };
             std::uint32_t height{ 0 };
             std::uint64_t lastSeenFrame{ 0 };
+            // A number overlay's label, rendered again only when its text or
+            // face changes; it goes with the panel's texture.
+            Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> label;
+            number_overlay::LabelMetrics labelMetrics{};
+            std::array<char, sizeof(api::number_overlay::Presentation::label)> labelText{};
+            bool labelHudFace{};
+            bool labelFailed{};
         };
 
         struct Resources
@@ -52,6 +59,7 @@ namespace rpsui::render
             Microsoft::WRL::ComPtr<ID3D11InputLayout> inputLayout;
             Microsoft::WRL::ComPtr<ID3D11DepthStencilState> worldDepthState;
             Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> digitAtlas;
+            number_overlay::InkRows digitInk{};
             bool digitAtlasFailed{};
             Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> hudAtlas;
             number_overlay::HudAtlasMetrics hudMetrics{};
@@ -668,10 +676,14 @@ namespace rpsui::render
             }
             GdiFlush();
             auto* bytes=static_cast<std::uint8_t*>(pixels);
+            // Ink rows let a label's digits match these digits' height.
+            unsigned inkTop=height, inkBottom=0;
             for (unsigned i=0;i<width*height;++i) {
                 const auto coverage=static_cast<std::uint8_t>((unsigned(bytes[i*4])+bytes[i*4+1]+bytes[i*4+2])/3);
                 bytes[i*4]=bytes[i*4+1]=bytes[i*4+2]=bytes[i*4+3]=coverage;
+                if (coverage>=128) { inkTop=(std::min)(inkTop,i/width); inkBottom=(std::max)(inkBottom,i/width+1); }
             }
+            if (inkBottom<=inkTop) return false;
             D3D11_TEXTURE2D_DESC desc{};
             desc.Width=width; desc.Height=height; desc.MipLevels=1; desc.ArraySize=1;
             desc.Format=DXGI_FORMAT_R8G8B8A8_UNORM; desc.SampleDesc.Count=1;
@@ -680,6 +692,7 @@ namespace rpsui::render
             Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
             if (FAILED(state.device->CreateTexture2D(&desc,&data,&texture)) ||
                 FAILED(state.device->CreateShaderResourceView(texture.Get(),nullptr,&state.digitAtlas))) return false;
+            state.digitInk={static_cast<float>(inkTop)/height,static_cast<float>(inkBottom)/height};
             state.digitAtlasFailed=false;
             return true;
         }
@@ -771,6 +784,100 @@ namespace rpsui::render
             return true;
         }
 
+        /*
+         * The overlay's label in the numbers' face (the HUD face or Plain's),
+         * one line rendered with GDI into its own texture, coverage in every
+         * channel as the atlases store it. The face's digit ink rows are
+         * measured on the same canvas, so layout sizes the label by its
+         * digits. Rendered again only when the text or face changes; a text
+         * that cannot be rendered is logged once and left out until it changes.
+         */
+        [[nodiscard]] ID3D11ShaderResourceView* ensureLabel(Resources& state,const RenderPanelSnapshot& panel,PanelGpu& gpu)
+        {
+            const auto& text=panel.numberLook.label;
+            if (text[0]=='\0') return nullptr;
+            const bool hudFace=panel.numberLook.style!=api::number_overlay::Style::Plain;
+            if (gpu.labelText==text && gpu.labelHudFace==hudFace) return gpu.labelFailed ? nullptr : gpu.label.Get();
+            gpu.labelText=text; gpu.labelHudFace=hudFace; gpu.label.Reset(); gpu.labelFailed=true;
+
+            std::array<wchar_t,sizeof(api::number_overlay::Presentation::label)> wide{};
+            const int converted=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,text.data(),-1,wide.data(),static_cast<int>(wide.size()));
+            if (converted<=1) {
+                log::warn("Numeric overlay {} label is not valid UTF-8; it is not drawn",panel.panelHandle);
+                return nullptr;
+            }
+            const int length=converted-1;
+            struct Canvas {
+                HDC dc{}; HBITMAP bitmap{}; HFONT font{}; HGDIOBJ oldBitmap{},oldFont{};
+                ~Canvas() {
+                    if (oldFont) SelectObject(dc,oldFont);
+                    if (oldBitmap) SelectObject(dc,oldBitmap);
+                    if (font) DeleteObject(font);
+                    if (bitmap) DeleteObject(bitmap);
+                    if (dc) DeleteDC(dc);
+                }
+            } canvas;
+            canvas.dc=CreateCompatibleDC(nullptr);
+            canvas.font=hudFace ?
+                CreateFontW(-number_overlay::kLabelFontPixels,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,
+                    OUT_TT_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Bahnschrift SemiBold Condensed") :
+                CreateFontW(-number_overlay::kLabelFontPixels,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,
+                    OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Segoe UI");
+            if (!canvas.dc || !canvas.font) return nullptr;
+            canvas.oldFont=SelectObject(canvas.dc,canvas.font);
+            constexpr wchar_t kDigits[]=L"0123456789";
+            constexpr int kDigitCount=10;
+            SIZE extent{}, digitExtent{};
+            if (!GetTextExtentPoint32W(canvas.dc,wide.data(),length,&extent) ||
+                !GetTextExtentPoint32W(canvas.dc,kDigits,kDigitCount,&digitExtent) || extent.cx<=0 || extent.cy<=0) return nullptr;
+            // Room for glyph overhang past the advance on either side.
+            const LONG pad=number_overlay::kLabelFontPixels/4;
+            const auto width=static_cast<unsigned>((std::max)(extent.cx,digitExtent.cx)+2*pad);
+            const auto height=static_cast<unsigned>((std::max)(extent.cy,digitExtent.cy));
+            BITMAPINFO info{};
+            info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
+            info.bmiHeader.biWidth=static_cast<LONG>(width); info.bmiHeader.biHeight=-static_cast<LONG>(height);
+            info.bmiHeader.biPlanes=1; info.bmiHeader.biBitCount=32; info.bmiHeader.biCompression=BI_RGB;
+            void* pixels{};
+            canvas.bitmap=CreateDIBSection(canvas.dc,&info,DIB_RGB_COLORS,&pixels,nullptr,0);
+            if (!canvas.bitmap || !pixels) return nullptr;
+            canvas.oldBitmap=SelectObject(canvas.dc,canvas.bitmap);
+            SetBkColor(canvas.dc,RGB(0,0,0)); SetTextColor(canvas.dc,RGB(255,255,255));
+            auto* bytes=static_cast<std::uint8_t*>(pixels);
+            std::memset(pixels,0,static_cast<std::size_t>(width)*height*4);
+            if (!TextOutW(canvas.dc,pad,0,kDigits,kDigitCount)) return nullptr;
+            GdiFlush();
+            unsigned digitTop=height, digitBottom=0;
+            for (unsigned i=0;i<width*height;++i) {
+                if ((unsigned(bytes[i*4])+bytes[i*4+1]+bytes[i*4+2])/3>=128) {
+                    digitTop=(std::min)(digitTop,i/width); digitBottom=(std::max)(digitBottom,i/width+1);
+                }
+            }
+            if (digitBottom<=digitTop) return nullptr;
+            std::memset(pixels,0,static_cast<std::size_t>(width)*height*4);
+            if (!TextOutW(canvas.dc,pad,0,wide.data(),length)) return nullptr;
+            GdiFlush();
+            for (unsigned i=0;i<width*height;++i) {
+                const auto coverage=static_cast<std::uint8_t>((unsigned(bytes[i*4])+bytes[i*4+1]+bytes[i*4+2])/3);
+                bytes[i*4]=bytes[i*4+1]=bytes[i*4+2]=bytes[i*4+3]=coverage;
+            }
+            D3D11_TEXTURE2D_DESC desc{};
+            desc.Width=width; desc.Height=height; desc.MipLevels=1; desc.ArraySize=1;
+            desc.Format=DXGI_FORMAT_R8G8B8A8_UNORM; desc.SampleDesc.Count=1;
+            desc.Usage=D3D11_USAGE_IMMUTABLE; desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+            D3D11_SUBRESOURCE_DATA data{pixels,width*4,0};
+            Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+            if (FAILED(state.device->CreateTexture2D(&desc,&data,&texture)) ||
+                FAILED(state.device->CreateShaderResourceView(texture.Get(),nullptr,&gpu.label))) {
+                log::warn("Numeric overlay {} label texture creation failed; it is not drawn",panel.panelHandle);
+                return nullptr;
+            }
+            gpu.labelMetrics={static_cast<float>(width),static_cast<float>(height),static_cast<float>(pad),
+                static_cast<float>(extent.cx),static_cast<float>(digitTop),static_cast<float>(digitBottom)};
+            gpu.labelFailed=false;
+            return gpu.label.Get();
+        }
+
         void beginNumberPass(Resources& state,const RenderPanelSnapshot& panel,ID3D11ShaderResourceView* atlas)
         {
             state.context->SetPredication(nullptr,FALSE);
@@ -806,7 +913,19 @@ namespace rpsui::render
             }
         }
 
-        bool renderHudNumberPanel(Resources& state,const RenderPanelSnapshot& panel)
+        // Draws the label texture over rect, tinted like the numbers.
+        void drawLabel(Resources& state,const RenderPanelSnapshot& panel,ID3D11ShaderResourceView* label,
+            const number_overlay::Rect& rect,const DirectX::XMFLOAT4& color)
+        {
+            if (!label || rect.right<=rect.left || rect.bottom<=rect.top) return;
+            beginNumberPass(state,panel,label);
+            state.batch->Begin();
+            state.batch->DrawQuad(Vertex{{rect.left,rect.top,0},color,{0,0}},Vertex{{rect.right,rect.top,0},color,{1,0}},
+                Vertex{{rect.right,rect.bottom,0},color,{1,1}},Vertex{{rect.left,rect.bottom,0},color,{0,1}});
+            state.batch->End(); state.effect->SetTexture(nullptr);
+        }
+
+        bool renderHudNumberPanel(Resources& state,const RenderPanelSnapshot& panel,PanelGpu& gpu)
         {
             const bool firstAttempt=!state.hudAtlasFailed;
             if (!ensureHudAtlas(state)) {
@@ -814,9 +933,10 @@ namespace rpsui::render
                 return false;
             }
             const bool chamber=panel.numberLook.chamber!=api::number_overlay::ChamberMarker::None;
+            auto* label=ensureLabel(state,panel,gpu);
             const auto layout=number_overlay::hudLayout(panel.number,panel.numberLook.secondaryValue,
                 panel.numberLook.style==api::number_overlay::Style::HudBracketed,state.hudMetrics,
-                panel.layoutWidth,panel.layoutHeight,chamber);
+                panel.layoutWidth,panel.layoutHeight,chamber,label ? &gpu.labelMetrics : nullptr);
             beginNumberPass(state,panel,state.hudAtlas.Get());
             const auto color=numberColor(panel);
             state.batch->Begin();
@@ -833,12 +953,13 @@ namespace rpsui::render
             }
             if (chamber) drawChamberCartridge(state,panel,layout.cartridge,color);
             state.batch->End(); state.effect->SetTexture(nullptr);
+            drawLabel(state,panel,label,layout.label,color);
             return true;
         }
 
-        bool renderNumberPanel(Resources& state,const RenderPanelSnapshot& panel)
+        bool renderNumberPanel(Resources& state,const RenderPanelSnapshot& panel,PanelGpu& gpu)
         {
-            if (panel.numberLook.style!=api::number_overlay::Style::Plain) return renderHudNumberPanel(state,panel);
+            if (panel.numberLook.style!=api::number_overlay::Style::Plain) return renderHudNumberPanel(state,panel,gpu);
             const bool firstAttempt=!state.digitAtlasFailed;
             if (!ensureDigitAtlas(state)) {
                 if (firstAttempt) log::error("Numeric overlay glyph atlas creation failed");
@@ -846,9 +967,18 @@ namespace rpsui::render
             }
             const auto pixelWidth=panel.layoutWidth, pixelHeight=panel.layoutHeight;
             const bool chamber=panel.numberLook.chamber!=api::number_overlay::ChamberMarker::None;
-            const auto placed=chamber ? number_overlay::plainChamberLayout(panel.number,pixelWidth,pixelHeight) :
-                number_overlay::PlainChamberLayout{number_overlay::layout(panel.number,pixelWidth,pixelHeight),{}};
-            const auto& layout=placed.digits;
+            auto* label=ensureLabel(state,panel,gpu);
+            number_overlay::Layout layout{};
+            number_overlay::Rect cartridge{}, labelRect{};
+            if (label) {
+                const auto placed=number_overlay::plainLabelLayout(panel.number,chamber,state.digitInk,gpu.labelMetrics,pixelWidth,pixelHeight);
+                layout=placed.digits; cartridge=placed.cartridge; labelRect=placed.label;
+            } else if (chamber) {
+                const auto placed=number_overlay::plainChamberLayout(panel.number,pixelWidth,pixelHeight);
+                layout=placed.digits; cartridge=placed.cartridge;
+            } else {
+                layout=number_overlay::layout(panel.number,pixelWidth,pixelHeight);
+            }
             beginNumberPass(state,panel,state.digitAtlas.Get());
             const auto color=numberColor(panel);
             state.batch->Begin();
@@ -863,9 +993,10 @@ namespace rpsui::render
             if (chamber && ensureHudAtlas(state)) {
                 beginNumberPass(state,panel,state.hudAtlas.Get());
                 state.batch->Begin();
-                drawChamberCartridge(state,panel,placed.cartridge,color);
+                drawChamberCartridge(state,panel,cartridge,color);
                 state.batch->End(); state.effect->SetTexture(nullptr);
             }
+            drawLabel(state,panel,label,labelRect,color);
             return true;
         }
 
@@ -899,7 +1030,7 @@ namespace rpsui::render
                 renderTarget,
                 clear.data());
 
-            if (panel.numberOverlay) return renderNumberPanel(state, panel);
+            if (panel.numberOverlay) return renderNumberPanel(state, panel, gpu);
             return panel_imgui::drawPanel(state.device.Get(), state.context.Get(), state.deviceGeneration,
                 state.frameSequence, panel, renderTarget, gpu.width, gpu.height, deltaSeconds);
         }

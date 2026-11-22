@@ -33,6 +33,8 @@ namespace rpsui
         std::uint32_t secondaryValue{ 0 };
         rpsui::api::number_overlay::Style style{ rpsui::api::number_overlay::Style::Plain };
         rpsui::api::number_overlay::ChamberMarker chamber{ rpsui::api::number_overlay::ChamberMarker::None };
+        // The label styles' text, terminated; empty for a 2.0 record.
+        std::array<char, sizeof(rpsui::api::number_overlay::Presentation::label)> label{};
     };
 
     struct RenderPanelSnapshot

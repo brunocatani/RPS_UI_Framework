@@ -553,9 +553,11 @@ namespace rpsui
         const api::number_overlay::Presentation& presentation) noexcept
     {
         try {
-            if (presentation.size<sizeof(presentation)) return api::Result::InvalidArgument;
+            // A 2.0 record ends before label; its bytes are never read.
+            if (presentation.size<api::number_overlay::kPresentationSize20) return api::Result::InvalidArgument;
             if (presentation.version!=api::kRecordVersion) return api::Result::VersionMismatch;
             if (!std::isfinite(presentation.opacity) || presentation.opacity<0 || presentation.opacity>1) return api::Result::InvalidArgument;
+            const bool hasLabel=presentation.size>=sizeof(presentation);
             NumberOverlayLook look{};
             for (std::size_t i=0;i<look.color.size();++i) {
                 const float channel=presentation.color[i];
@@ -564,6 +566,11 @@ namespace rpsui
             }
             if (presentation.style!=api::number_overlay::Style::Plain && presentation.style!=api::number_overlay::Style::Hud &&
                 presentation.style!=api::number_overlay::Style::HudBracketed) return api::Result::InvalidArgument;
+            if (hasLabel) {
+                const auto end=std::find(std::begin(presentation.label),std::end(presentation.label),'\0');
+                if (end==std::end(presentation.label)) return api::Result::InvalidArgument;
+                std::copy(std::begin(presentation.label),end,look.label.begin());
+            }
             if (presentation.chamber!=api::number_overlay::ChamberMarker::None && presentation.chamber!=api::number_overlay::ChamberMarker::Empty &&
                 presentation.chamber!=api::number_overlay::ChamberMarker::Chambered) return api::Result::InvalidArgument;
             look.style=presentation.style;

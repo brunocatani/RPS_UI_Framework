@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+- **For mod authors: NumberOverlay 2.1.** A `label` drawn with the numbers in their
+  face and color: beside the second row in the chamber column of the HUD styles,
+  after the number in `Plain`. ROCK's ammo counters use it for the caliber. Mods
+  built for 2.0 keep working.
+
 ### Changed
 
 - The settings menu is now the **ROCK Family Configurator**, and so is its holotape

@@ -9,7 +9,7 @@ namespace rpsui::api::number_overlay
 {
     inline constexpr InterfaceId kInterfaceId = InterfaceId::NumberOverlay;
     inline constexpr std::uint32_t kMajor = 2;
-    inline constexpr std::uint32_t kMinor = 0;
+    inline constexpr std::uint32_t kMinor = 1;
     inline constexpr float kAspect = 1024.0f / 480.0f;
 
     // How the host lays out an overlay's numbers.
@@ -24,6 +24,12 @@ namespace rpsui::api::number_overlay
         // a bottom bar with end ticks up.
         HudBracketed = 2,
     };
+
+    // 2.1: the label's digits are kLabelScale of the numbers' digit height.
+    // Plain with a label draws its number kPlainLabelNumberFill of the panel
+    // height (the share 2.0 Plain fills with 0.85), left aligned.
+    inline constexpr float kLabelScale = 0.62f;
+    inline constexpr float kPlainLabelNumberFill = 0.42f;
 
     // A cartridge beside the number, in every style, for a consumer that knows
     // what a weapon's chamber holds.
@@ -59,7 +65,16 @@ namespace rpsui::api::number_overlay
         Style style{ Style::Plain };
         ChamberMarker chamber{ ChamberMarker::None };
         std::uint8_t reservedStyle[2]{};
+        // 2.1: a short text drawn with the numbers in their face and color,
+        // UTF-8, terminated inside the array; empty for none. Hud styles: the
+        // label shares the chamber column right of the rows, beside the second
+        // row on its baseline, and the cartridge takes the first row only.
+        // Plain: the label follows the number (and cartridge) on its baseline.
+        // A label wider than the panel's remaining width shrinks alone; the
+        // numbers keep their size. A 2.0 record ends before this field.
+        char label[32]{};
     };
+    inline constexpr std::uint32_t kPresentationSize20 = 104;
 
     struct Api
     {
@@ -74,9 +89,9 @@ namespace rpsui::api::number_overlay
     };
 
     static_assert(std::is_standard_layout_v<Registration> && sizeof(Registration) == 168);
-    static_assert(std::is_standard_layout_v<Presentation> && sizeof(Presentation) == 104);
+    static_assert(std::is_standard_layout_v<Presentation> && sizeof(Presentation) == 136);
     static_assert(offsetof(Presentation, value) == 72 && offsetof(Presentation, style) == 100 &&
-        offsetof(Presentation, chamber) == 101);
+        offsetof(Presentation, chamber) == 101 && offsetof(Presentation, label) == kPresentationSize20);
     static_assert(std::is_standard_layout_v<Api> && sizeof(Api) == 24);
 }
 #pragma pack(pop)
