@@ -1,54 +1,56 @@
 #include "IniSettingsStore.h"
-#include <DIAMOND/Configuration.h>
 #include <Windows.h>
 #include <cassert>
-#include <fstream>
-#include <chrono>
 
 int main(int argc,char** argv) {
-    using namespace rpsui::settings_menu;namespace fs=std::filesystem;
-    assert(argc==2);const auto module=LoadLibraryW(fs::path(argv[1]).c_str());assert(module);
-    const auto calls=reinterpret_cast<unsigned(*)() noexcept>(GetProcAddress(module,"DIAMONDTestReloadCount"));
-    const auto accept=reinterpret_cast<void(*)(bool) noexcept>(GetProcAddress(module,"DIAMONDTestAcceptReload"));assert(calls&&accept);
-    const auto path=fs::temp_directory_path()/("palm-diamond-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".ini");
-    {std::ofstream out(path);out<<"; retained user comment\n";std::string_view section;
-        for(const auto& setting:diamond::configuration::kSettings) {
-            if(section!=setting.section){section=setting.section;out<<'['<<section<<"]\n";}
-            out<<setting.key<<" = "<<setting.defaultValue<<'\n';
-        }
-        out<<"[UserNotes]\nsNote = keep this\n";
-    }
-    const auto read=[&]{std::ifstream in(path);return std::string(std::istreambuf_iterator<char>(in),{});};
-    const auto before=read();IniSettingsStore store(path,RpsMod::Diamond);assert(store.load());
+    using namespace rpsui::settings_menu;
+    namespace config=diamond::configuration;
+    assert(argc==2);
     assert(std::wstring_view(modInfo(RpsMod::Diamond).module)==L"DIAMOND.dll");
-    const auto height=store.indexForId("Pouch.fUpGame"),rotation=store.indexForId("Pouch.fRotationXDegrees"),enabled=store.indexForId("Pouch.bEnabled");
-    assert(height&&rotation&&enabled&&store.settings().size()==diamond::configuration::kSettings.size()+1);
-    assert(store.settings()[*height].label=="Height"&&store.isSlider(*height));
-    assert(store.settings()[*rotation].type==SettingType::Float&&store.settings()[*rotation].control.minimum==-180);
-    assert(store.setNumericByIndex(*height,1000).saved&&store.settings()[*height].numericValue==80); // PALM clamps slider edits.
-    assert(store.setNumericByIndex(*height,12.5).saved);
-    assert(store.setBooleanByIndex(*enabled,false).saved);
-    const auto hud=store.indexForId("AmmoHUD.fOffsetOutwardGame");assert(hud&&store.isSlider(*hud));
-    assert(store.settings()[*hud].control.minimum==-30&&store.settings()[*hud].control.maximum==30);
-    assert(store.setNumericByIndex(*hud,8.5).saved);
-    const std::array<std::pair<const char*,double>,6> indicatorSettings{{
-        {"fIndicatorRightGame",2.5},{"fIndicatorUpGame",-3},{"fIndicatorOutwardGame",10},
-        {"fIndicatorTiltDegrees",15},{"fIndicatorTurnDegrees",25},{"fIndicatorRollDegrees",35}}};
-    for(const auto& [key,value]:indicatorSettings){
-        const auto index=store.indexForId(std::string("PouchUI.")+key);assert(index&&store.isSlider(*index));
-        assert(store.setNumericByIndex(*index,value).saved&&store.settings()[*index].numericValue==value);
-    }
-    const auto facePlayer=store.indexForId("PouchUI.bIndicatorFacePlayer");assert(facePlayer&&store.setBooleanByIndex(*facePlayer,false).saved);
+    assert(std::string_view(modInfo(RpsMod::Diamond).ini)=="DIAMOND.toml");
+    IniSettingsStore absent("never-read.toml",RpsMod::Diamond);assert(!absent.load());
+    const auto module=LoadLibraryA(argv[1]);assert(module);
+    const auto query=reinterpret_cast<config::Query>(GetProcAddress(module,config::kQueryExport));assert(query);
+    assert(!query(1,0,32)); // Major 1 is retired.
+    const auto* api=query(config::kMajor,config::kMinor,sizeof(config::Api));assert(api);
 #ifdef RPSUI_SETTINGS_MENU_PREVIEW
-    assert(calls()==0&&read()==before);
+    assert(!absent.load()); // A loaded real module is never auto-bound by preview.
+    const auto* fixture=api;
 #else
-    assert(calls()==11);const auto saved=read();assert(saved.find("fUpGame = 12.5")!=std::string::npos);
-    assert(saved.find("fOffsetOutwardGame = 8.5")!=std::string::npos);
-    assert(saved.find("; retained user comment")!=std::string::npos&&saved.find("sNote = keep this")!=std::string::npos);
-    IniSettingsStore reopened(path,RpsMod::Diamond);assert(reopened.load());
-    for(const auto& [key,value]:indicatorSettings){const auto index=reopened.indexForId(std::string("PouchUI.")+key);assert(index&&reopened.settings()[*index].numericValue==value);}
-    accept(false);const auto result=store.setNumericByIndex(*rotation,25);
-    assert(result.saved&&result.message.find("could not apply live")!=std::string::npos&&calls()==12);
+    const config::Api* fixture=nullptr; // Exercise real named-module discovery.
 #endif
-    assert(FreeLibrary(module));fs::remove(path);
+    IniSettingsStore store("never-read.toml",RpsMod::Diamond,nullptr,{},0,nullptr,fixture);
+    assert(store.load()&&store.settings().size()==config::kSettingCount);
+    // Every row is DIAMOND's catalog entry, in its order, with its control.
+    for(std::size_t i=0;i<config::kSettingCount;++i) {
+        const auto& metadata=config::kSettings[i];const auto& row=store.settings()[i];
+        assert(row.section==metadata.table&&row.key==metadata.key&&row.label==metadata.label&&row.category==metadata.category);
+        assert(row.value==row.defaultValue&&!row.overridden);
+        switch(metadata.type) {
+        case config::Type::Toggle:assert(row.type==SettingType::Boolean&&row.control.kind==setting_control::Kind::Checkbox);break;
+        case config::Type::Choice:
+            assert(row.type==SettingType::String&&row.control.kind==setting_control::Kind::Dropdown&&row.control.options.size()==metadata.choiceCount);
+            assert(row.selectedOptionIndex&&*row.selectedOptionIndex==static_cast<std::size_t>(metadata.defaultValue));break;
+        default:
+            assert(row.type==SettingType::Float&&row.control.kind==setting_control::Kind::Numeric&&row.control.bounded);
+            assert(row.control.minimum==metadata.minimum&&row.control.maximum==metadata.maximum&&row.control.step==metadata.step);
+        }
+    }
+    // Writes go through DIAMOND by name: numbers clamp to the catalog's range, choices by name.
+    const auto up=store.indexForId("Pouch.Up");const auto style=store.indexForId("MagazineCounter.Style");
+    const auto enabled=store.indexForId("Pouch.Enabled");assert(up&&style&&enabled&&store.isSlider(*up));
+    assert(store.setNumericByIndex(*up,1000).saved&&store.settings()[*up].numericValue==80);
+    assert(store.setNumericByIndex(*up,12.5).saved);
+    assert(store.setOptionByIndex(*style,0).saved&&store.settings()[*style].value=="Plain");
+    assert(store.setBooleanByIndex(*enabled,false).saved);
+    config::Snapshot state;assert(api->snapshot(&state)==config::Status::Ok);
+    const auto value=[&](config::Setting id){return state.values[static_cast<std::size_t>(id)];};
+#ifdef RPSUI_SETTINGS_MENU_PREVIEW
+    assert(state.revision==1&&value(config::Setting::PouchUp)==config::metadata(config::Setting::PouchUp).defaultValue); // No live call.
+#else
+    assert(state.revision==5&&value(config::Setting::PouchUp)==12.5f&&value(config::Setting::MagazineStyle)==0&&value(config::Setting::PouchEnabled)==0);
+    assert(store.needsReload()&&store.reload()&&store.settings()[*up].value=="12.5"&&!store.needsReload());
+#endif
+    assert(!std::filesystem::exists("never-read.toml"));
+    FreeLibrary(module);
 }

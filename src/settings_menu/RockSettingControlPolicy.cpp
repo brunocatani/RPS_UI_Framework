@@ -436,8 +436,14 @@ namespace rpsui::settings_menu::setting_control
             return {.kind=Kind::Numeric,.bounded=true,.minimum=0.0,.maximum=1.0,.step=0.1};
         if(mod==RpsMod::RpsUi && key=="GripMoveSeconds")
             return {.kind=Kind::Numeric,.bounded=true,.minimum=0.2,.maximum=1.5,.step=0.05};
-        if(mod==RpsMod::Diamond)if(const auto* setting=diamond::configuration::find(key)) {
-            if(setting->boolean)return {.kind=Kind::Checkbox};
+        if(mod==RpsMod::Diamond)if(const auto* setting=diamond::configuration::find(section,key)) {
+            using DiamondType=diamond::configuration::Type;
+            if(setting->type==DiamondType::Toggle)return {.kind=Kind::Checkbox};
+            if(setting->type==DiamondType::Choice) {
+                Spec spec{.kind=Kind::Dropdown};
+                for(std::uint32_t i=0;i<setting->choiceCount;++i)spec.options.push_back({setting->choices[i],setting->choices[i]});
+                return spec;
+            }
             return {.kind=Kind::Numeric,.bounded=true,.minimum=setting->minimum,.maximum=setting->maximum,.step=setting->step};
         }
         if (mod != RpsMod::Rock && mod != RpsMod::RockDeveloper) {

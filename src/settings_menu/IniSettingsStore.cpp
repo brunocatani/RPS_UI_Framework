@@ -1,6 +1,5 @@
 #include "RockConfigurationClient.h"
 #include "IniSettingsStore.h"
-#include <DIAMOND/Configuration.h>
 #include "EmitterSettings.h"
 
 #include <ShlObj.h>
@@ -284,9 +283,10 @@ namespace rpsui::settings_menu
         setting.numericValueValid = false;
         if (_mod != RpsMod::Csah) {
             if (!setting.fromRockApi) setting.type = setting.tomlString ? SettingType::String : inferType(setting.value);
-            if(_mod==RpsMod::Diamond)if(const auto* entry=diamond::configuration::find(setting.key);entry&&setting.section==entry->section) {
-                setting.type=entry->boolean?SettingType::Boolean:SettingType::Float;
-                setting.label=entry->label;setting.defaultValue=entry->defaultValue;
+            if(_mod==RpsMod::Diamond)if(const auto* entry=diamond::configuration::find(setting.section,setting.key)) {
+                using Type=diamond::configuration::Type;
+                setting.type=entry->type==Type::Toggle?SettingType::Boolean:entry->type==Type::Choice?SettingType::String:SettingType::Float;
+                setting.label=entry->label;
             }
             if(_mod==RpsMod::Emitters && equalsIgnoreCase(setting.section,"Main"))
                 if(const auto* entry=emitter_settings::find(setting.key)) {
@@ -351,6 +351,10 @@ namespace rpsui::settings_menu
         if (_scissorsApi) {
             scissors::configuration::Snapshot snapshot;
             return _scissorsApi->snapshot(&snapshot)!=scissors::configuration::Status::Ok || snapshot.revision!=_loadedRevision;
+        }
+        if (_diamondApi) {
+            diamond::configuration::Snapshot snapshot;
+            return _diamondApi->snapshot(&snapshot)!=diamond::configuration::Status::Ok || snapshot.revision!=_loadedRevision;
         }
         std::uint64_t revision{};
         return _configurationApi && (_configurationApi->revision(_configurationOwner,&revision)!=rock::api::Status::Ok || revision != _loadedRevision);
@@ -455,6 +459,7 @@ namespace rpsui::settings_menu
         }
 
         if (isScissorsConfiguration(_mod)) return loadScissorsSettings();
+        if (_mod == RpsMod::Diamond) return loadDiamondSettings();
         if (_useRockApi && !connectRockApi()) return false;
         if (_useRockApi) return reloadRockSnapshot();
         if (_mod == RpsMod::Csah) return loadCsahSettings();
@@ -938,6 +943,14 @@ namespace rpsui::settings_menu
                 .setting = setting,
             };
         }
+        if (_mod == RpsMod::Diamond) {
+            if (!saveDiamondSetting(setting, *normalizedValue))
+                return { .message = _lastError, .setting = setting };
+            setting.value = *normalizedValue;
+            setting.overridden = setting.value != setting.defaultValue;
+            refreshControl(setting);
+            return { .changed = true, .saved = true, .message = "saved; applying next frame", .setting = setting };
+        }
         if (isScissorsConfiguration(_mod)) {
             if (!saveScissorsSetting(setting, *normalizedValue))
                 return { .message = _lastError, .setting = setting };
@@ -1008,13 +1021,6 @@ namespace rpsui::settings_menu
             setting = previousSetting;
         }
         std::string message=saved?"saved":_lastError;
-#ifndef RPSUI_SETTINGS_MENU_PREVIEW
-        if(saved&&_mod==RpsMod::Diamond) {
-            const auto module=GetModuleHandleW(modInfo(RpsMod::Diamond).module);
-            const auto reload=module?reinterpret_cast<diamond::configuration::ReloadSettings>(GetProcAddress(module,diamond::configuration::kReloadExport)):nullptr;
-            message=reload&&reload()?"saved; applying on next frame":"saved; DIAMOND could not apply live—check DIAMOND.log or restart";
-        }
-#endif
         return {
             .changed = true,
             .saved = saved,

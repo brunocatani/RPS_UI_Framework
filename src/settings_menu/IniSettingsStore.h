@@ -4,6 +4,7 @@
 #include "RpsMod.h"
 #include <ROCK/Configuration.h>
 #include <SCISSORS/Configuration.h>
+#include <DIAMOND/Configuration.h>
 
 #include <cstdint>
 #include <filesystem>
@@ -65,8 +66,9 @@ namespace rpsui::settings_menu
     public:
         explicit IniSettingsStore(std::filesystem::path path = {}, RpsMod mod = RpsMod::Rock,
             const rock::api::configuration::Api* api = nullptr, std::filesystem::path catalogPath = {}, rock::api::OwnerToken owner = 0,
-            const scissors::configuration::Api* scissorsApi = nullptr) :
+            const scissors::configuration::Api* scissorsApi = nullptr, const diamond::configuration::Api* diamondApi = nullptr) :
             _path(std::move(path)), _catalogPath(std::move(catalogPath)), _mod(mod), _configurationApi(api), _configurationOwner(owner), _scissorsApi(scissorsApi),
+            _diamondApi(diamondApi),
             _useRockApi(api || (_path.empty() && isRockConfiguration(mod))) {}
 
         [[nodiscard]] bool load();
@@ -118,6 +120,8 @@ namespace rpsui::settings_menu
         [[nodiscard]] bool reloadRockSnapshot();
         [[nodiscard]] bool loadScissorsSettings();
         [[nodiscard]] bool saveScissorsSetting(const SettingRecord& setting, std::string_view value);
+        [[nodiscard]] bool loadDiamondSettings();
+        [[nodiscard]] bool saveDiamondSetting(const SettingRecord& setting, std::string_view value);
         [[nodiscard]] bool loadCsahSettings();
         [[nodiscard]] bool saveCsahSetting(const SettingRecord& setting, std::string_view value);
         [[nodiscard]] rock::api::configuration::Group rockGroup() const noexcept;
@@ -135,6 +139,7 @@ namespace rpsui::settings_menu
         rock::api::OwnerToken _configurationOwner{};
         rock::api::Status _lastProviderStatus{rock::api::Status::Ok};
         const scissors::configuration::Api* _scissorsApi = nullptr;
+        const diamond::configuration::Api* _diamondApi = nullptr;
         bool _useRockApi = false;
         std::uint64_t _loadedRevision = 0;
         // A .toml file as RPS Framework's settings store writes it: "## === "

@@ -122,6 +122,7 @@ set(SETTINGS_MENU_SOURCES
   src/settings_menu/ConsoleService.cpp
   src/settings_menu/ConsoleTab.cpp
   src/settings_menu/CsahSettings.cpp
+  src/settings_menu/DiamondSettings.cpp
   src/settings_menu/ExternalPages.cpp
   src/settings_menu/IniSettingsStore.cpp
   src/settings_menu/MenuTheme.cpp
@@ -327,7 +328,7 @@ if(RPS_UI_FRAMEWORK_BUILD_TESTS)
   set(SETTINGS_MENU_TEST_DIR "${ROOT_DIR}/tests/settings_menu")
   set(SETTINGS_MENU_STORE_SOURCES
     src/settings_menu/IniSettingsStore.cpp src/settings_menu/ScissorsSettings.cpp
-    src/settings_menu/CsahSettings.cpp src/settings_menu/RockSettingControlPolicy.cpp)
+    src/settings_menu/CsahSettings.cpp src/settings_menu/DiamondSettings.cpp src/settings_menu/RockSettingControlPolicy.cpp)
   function(settings_menu_test target)
     add_executable(${target} ${ARGN})
     target_include_directories(${target} PRIVATE "${SOURCE_DIR}/settings_menu" "${ROCK_INCLUDE_DIR}"
@@ -337,7 +338,7 @@ if(RPS_UI_FRAMEWORK_BUILD_TESTS)
     target_compile_options(${target} PRIVATE /UNDEBUG /utf-8)
     target_link_libraries(${target} PRIVATE shell32 nlohmann_json::nlohmann_json)
   endfunction()
-  foreach(stub ScissorsConfiguration:SCISSORS DiamondReload:DIAMOND EmittersModule:ROCK_Emitters)
+  foreach(stub ScissorsConfiguration:SCISSORS DiamondConfiguration:DIAMOND EmittersModule:ROCK_Emitters)
     string(REPLACE ":" ";" stub "${stub}")
     list(GET stub 0 stub_source)
     list(GET stub 1 stub_name)
@@ -359,9 +360,9 @@ if(RPS_UI_FRAMEWORK_BUILD_TESTS)
     add_test(NAME SettingsMenu.Csah${mode}
       COMMAND SettingsMenuCsah${mode}Tests "${WORKSPACE_ROOT}/graphics_mods/CSAH/settings/PALMSettings.json")
     settings_menu_test(SettingsMenuDiamond${mode}Tests "${SETTINGS_MENU_TEST_DIR}/DiamondSettingsTests.cpp" ${SETTINGS_MENU_STORE_SOURCES})
-    add_dependencies(SettingsMenuDiamond${mode}Tests SettingsMenuDiamondReloadTestStub)
+    add_dependencies(SettingsMenuDiamond${mode}Tests SettingsMenuDiamondConfigurationTestStub)
     add_test(NAME SettingsMenu.Diamond${mode}
-      COMMAND SettingsMenuDiamond${mode}Tests "$<TARGET_FILE:SettingsMenuDiamondReloadTestStub>")
+      COMMAND SettingsMenuDiamond${mode}Tests "$<TARGET_FILE:SettingsMenuDiamondConfigurationTestStub>")
     settings_menu_test(SettingsMenuEmitters${mode}Tests "${SETTINGS_MENU_TEST_DIR}/EmittersSettingsTests.cpp" ${SETTINGS_MENU_STORE_SOURCES})
     add_dependencies(SettingsMenuEmitters${mode}Tests SettingsMenuEmittersModuleTestStub)
     target_compile_definitions(SettingsMenuEmitters${mode}Tests PRIVATE
