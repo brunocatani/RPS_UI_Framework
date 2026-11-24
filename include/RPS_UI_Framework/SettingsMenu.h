@@ -2,9 +2,8 @@
 #include "Framework.h"
 
 // The settings menu: the Spawner, the Console and the pages mods add, on one
-// panel RPS UI owns. Players open it from the RPS UI holotape in the Pip-Boy; a mod may
-// open it too (RobCo PALM's wheel does) and add its own pages, which it draws with its own
-// copy of Dear ImGui exactly like a Framework panel. Owner tokens come from
+// panel RPS UI owns. A mod opens it (RobCo PALM's wheel does) and may add its own pages,
+// which it draws with its own copy of Dear ImGui exactly like a Framework panel. Owner tokens come from
 // Framework::registerConsumer.
 #pragma pack(push, 8)
 namespace rpsui::api::settings_menu

@@ -9,20 +9,17 @@ It works alongside [Mods Config FO4 VR](https://github.com/ArthurHub/F4VR-Mods-C
 while that menu is open, the controllers belong to it and RPS UI panels take no
 input until it closes.
 
-## ROCK Family Configurator
+## Spawner and Console
 
-Play the **ROCK Family Configurator** holotape in your Pip-Boy (enable
-`RPS_UI_Framework.esp`; you get the holotape whenever a game starts or loads without
-one, with or without RobCo PALM). When you close the Pip-Boy, the menu opens in front
-of you with:
+**Config** on RobCo PALM's wheel opens a menu with:
 
 - **Spawner**: add any item from your load order to your inventory.
 - **Console**: run console commands with the on-screen keyboard or a real one. Its
   shortcut buttons are in `Mods_Config\RPS_UI_Framework\ConsoleCommands.ini`.
 - The pages other mods add, such as RobCo PALM's **Wheel items** and **Wheel settings**.
 
-RobCo PALM's Config opens the same menu from the wheel, on its wheel pages. Every
-mod's settings are on that mod's own page in Mods Config FO4 VR.
+Every mod's settings are on that mod's own page in Mods Config FO4 VR. RPS UI
+Framework no longer has a holotape or a plugin (`RPS_UI_Framework.esp`).
 
 ## Settings and themes
 

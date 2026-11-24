@@ -12,14 +12,20 @@
 
 ### Changed
 
-- **ROCK's settings pages are gone from the ROCK Family Configurator.** ROCK 1.0.4
+- **ROCK's settings pages are gone.** ROCK 1.0.4
   moves its settings and setup wizard to its own page in Mods Config FO4 VR. Update
   RPS UI Framework together with ROCK 1.0.4: 2.0.2 and older still list ROCK pages
   that no longer work.
-- **The Settings tab is gone from the ROCK Family Configurator.** Every mod's settings
-  are now on that mod's own page in Mods Config FO4 VR. The menu keeps the Spawner,
-  the Console and RobCo PALM's Wheel items and Wheel settings. It opens on PALM's
-  wheel pages, or on the Spawner without PALM, and after that on the tab you left it on.
+- **The Settings tab is gone.** Every mod's settings are now on that mod's own page in
+  Mods Config FO4 VR. The menu RobCo PALM's Config opens keeps the Spawner, the
+  Console and PALM's Wheel items and Wheel settings. It opens on PALM's wheel pages
+  and after that on the tab you left it on. Its header now reads Config.
+
+### Removed
+
+- **The ROCK Family Configurator holotape and `RPS_UI_Framework.esp`.** The menu
+  opens from RobCo PALM's Config. Your mod manager removes the plugin with this
+  update; a save made with it reports it missing once, which is safe to accept.
 
 ## 2.0.2
 

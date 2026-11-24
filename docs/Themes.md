@@ -1,6 +1,6 @@
 # Themes
 
-Every world panel drawn through RPS UI Framework (RobCo PALM's wheel, the ROCK Family Configurator, dialogue, the backpack, and any other mod's panels) takes its colours, fonts and sizes from one theme. Change the theme and every panel follows, while the game runs.
+Every world panel drawn through RPS UI Framework (RobCo PALM's wheel and its Config menu, dialogue, the backpack, and any other mod's panels) takes its colours, fonts and sizes from one theme. Change the theme and every panel follows, while the game runs.
 
 ## Choosing a theme
 

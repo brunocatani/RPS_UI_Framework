@@ -2,7 +2,7 @@
 
 `SettingsMenu.h`, interface `SettingsMenu`, version 2.0.
 
-RPS UI's settings menu, shown to players as the **ROCK Family Configurator**, holds the Spawner, the Console and the pages mods add on one panel. Mods' settings are not in it: each mod has its own page in Mods Config FO4 VR. Players open it by playing the **ROCK Family Configurator** holotape in the Pip-Boy (`RPS_UI_Framework.esp` gives the player one whenever a game starts or loads without it). A mod can open it as well, as RobCo PALM's wheel does, and add pages of its own to the menu's top bar.
+RPS UI's settings menu holds the Spawner, the Console and the pages mods add on one panel. Mods' settings are not in it: each mod has its own page in Mods Config FO4 VR. The menu has no way in of its own: a mod opens it, as RobCo PALM's Config does, and may add pages of its own to the menu's top bar.
 
 The table needs an owner token from `framework::Api::registerConsumer`.
 

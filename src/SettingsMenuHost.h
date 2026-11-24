@@ -10,8 +10,7 @@ namespace rpsui::settings_menu_host
     // kGameDataReady, after the host started: registers the menu's panels, subscribes to
     // input and builds the Spawner's index.
     void onHostReady() noexcept;
-    // kPreLoadGame (false), kNewGame and kPostLoadGame (true). A session start also gives the
-    // player the settings holotape when they have none.
+    // kPreLoadGame (false), kNewGame and kPostLoadGame (true).
     void onSessionReady(bool ready) noexcept;
 
     struct Pose

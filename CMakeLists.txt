@@ -181,8 +181,7 @@ if(POST_BUILD_COPY_PLUGIN)
       COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "$<TARGET_PDB_FILE:${PROJECT_NAME}>"
         "${copy_path}/F4SE/Plugins/"
-      # data/mod: the game data the player installs: the settings holotape's plugin, whose
-      # source is data/plugin-source (a Spriggit project), and the Mods Config FO4 VR page.
+      # data/mod: the game data the player installs: the Mods Config FO4 VR page.
       COMMAND ${CMAKE_COMMAND} -E copy_directory "${ROOT_DIR}/data/mod" "${copy_path}"
       COMMENT "Deploying RPS UI Framework to ${copy_path}")
   endforeach()
@@ -214,7 +213,7 @@ if(RPS_UI_FRAMEWORK_BUILD_TESTS)
   add_test(NAME RPSUIFramework.GraphicsStateCommit COMMAND RPSUIGraphicsStateCommitTests)
   # Exercise actual exported tables, registries and input subscriptions. The
   # test never installs native hooks; scene-depth demand is stubbed.
-  add_executable(RPSUIRegistryTests tests/RegistryTests.cpp src/FrameworkRuntime.cpp src/Api.cpp src/WorldDrawStore.cpp src/RequiredUpdates.cpp src/KeyboardCapture.cpp src/ModsConfigMenu.cpp src/render/PanelImGui.cpp src/UiSettings.cpp src/ThemeStore.cpp src/Haptics.cpp src/SettingsMenuHost.cpp src/SettingsHolotape.cpp)
+  add_executable(RPSUIRegistryTests tests/RegistryTests.cpp src/FrameworkRuntime.cpp src/Api.cpp src/WorldDrawStore.cpp src/RequiredUpdates.cpp src/KeyboardCapture.cpp src/ModsConfigMenu.cpp src/render/PanelImGui.cpp src/UiSettings.cpp src/ThemeStore.cpp src/Haptics.cpp src/SettingsMenuHost.cpp)
   target_compile_features(RPSUIRegistryTests PRIVATE cxx_std_23)
   target_compile_definitions(RPSUIRegistryTests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX NOMMNOSOUND)
   target_include_directories(RPSUIRegistryTests PRIVATE "${SOURCE_DIR}" "${PUBLIC_INCLUDE_DIR}")

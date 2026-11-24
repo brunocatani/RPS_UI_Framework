@@ -3,7 +3,6 @@
 #include "SettingsMenuHost.h"
 
 #include "Logger.h"
-#include "SettingsHolotape.h"
 
 #include "settings_menu/ConfiguratorRuntime.h"
 #include "settings_menu/ConsoleService.h"
@@ -46,10 +45,6 @@ namespace rpsui::settings_menu_host
             settings_menu::setAvailable(usable);
             if (!usable) {
                 return;
-            }
-            // The holotape was played: the menu opens once gameplay input is back.
-            if (settings_holotape::takePlayed()) {
-                (void)open(nullptr);
             }
             api::input::KeyboardRead keyboard;
             std::array<settings_menu::ConsoleKeyEvent, api::input::kKeyboardEventCapacity> keys{};
@@ -116,7 +111,6 @@ namespace rpsui::settings_menu_host
             return;
         }
         settings_menu::onGameDataReady();
-        settings_holotape::onGameDataReady();
         log::info("Settings menu ready");
     }
 
@@ -126,9 +120,7 @@ namespace rpsui::settings_menu_host
         s.sessionReady.store(ready, std::memory_order_release);
         if (!ready) {
             settings_menu::setAvailable(false);
-            return;
         }
-        settings_holotape::onSessionReady();
     }
 
     bool open(const Pose* request) noexcept

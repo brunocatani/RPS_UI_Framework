@@ -14,7 +14,7 @@
   "content": [
     {
       "type": "text",
-      "text": "These settings apply to the world panels of every mod built on RPS UI Framework: RobCo PALM's wheel, the ROCK Family Configurator and the panels other mods show. A change shows on the panels at once; Save keeps it."
+      "text": "These settings apply to the world panels of every mod built on RPS UI Framework: RobCo PALM's wheel, its Config menu and the panels other mods show. A change shows on the panels at once; Save keeps it."
     },
     {
       "type": "section",
