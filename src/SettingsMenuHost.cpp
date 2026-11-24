@@ -128,7 +128,6 @@ namespace rpsui::settings_menu_host
             settings_menu::setAvailable(false);
             return;
         }
-        settings_menu::onGameSessionReady();
         settings_holotape::onSessionReady();
     }
 

@@ -5,10 +5,7 @@
 #include "ConsoleService.h"
 #include "ConsoleTab.h"
 #include "ExternalPages.h"
-#include "SettingHelp.h"
 #include "OnScreenKeyboard.h"
-#include "IniSettingsStore.h"
-#include "LoadedRpsMods.h"
 #include "PanelResizePolicy.h"
 #include "SpawnBrowser.h"
 #include "render/FrameworkPanelRenderer.h"
@@ -23,21 +20,9 @@ namespace rpsui::settings_menu
     {
 
         constexpr std::size_t kRuntimeActionQueueCapacity = 32;
-        constexpr std::uint64_t kSettingTargetIdentityMask =
-            (std::uint64_t{ 1 } << 60) - 1;
-        constexpr std::uint64_t kInvalidRightHorizontalTarget =
-            (std::numeric_limits<std::uint64_t>::max)();
-        constexpr std::uint64_t kSemanticFnvOffset = 14695981039346656037ull;
-        constexpr std::uint64_t kSemanticFnvPrime = 1099511628211ull;
-        constexpr panel_resize::Constraints kPanelResizeConstraints{
-            .aspectRatio = devui::render::kPanelAspectRatio,
-            .minimumWidth = devui::render::kMinimumPanelPhysicalWidth,
-            .maximumWidth = devui::render::kMaximumPanelPhysicalWidth,
-        };
 
         enum class ConfiguratorTab : std::uint8_t
         {
-            Settings,
             Spawn,
             Console,
             External, // A page another mod added; s_externalPage names it
@@ -51,14 +36,6 @@ namespace rpsui::settings_menu
             UiClose,
             UiBack,
             UiSelectTab,
-            UiSelectMod,
-            UiSelectRow,
-            UiAdjustRow,
-            UiSetBooleanRow,
-            UiSetNumericRow,
-            UiSetOptionRow,
-            UiReload,
-            UiRefreshSettings,
             UiResetPanelLayout,
             UiSpawnSelectPlugin,
             UiSpawnSelectCategory,
@@ -90,50 +67,22 @@ namespace rpsui::settings_menu
         struct RuntimeAction
         {
             RuntimeActionKind kind{ RuntimeActionKind::NoOp };
-            ConfiguratorTab tab{ ConfiguratorTab::Settings };
+            ConfiguratorTab tab{ ConfiguratorTab::Spawn };
             int value{ 0 };
             std::size_t index{ 0 };
             std::uint32_t formId{ 0 };
-            std::uint64_t horizontalTarget{ kInvalidRightHorizontalTarget };
-            double numericValue{ 0.0 };
             bool hasPanelPose{ false };
             PanelPose panelPose{};
             std::uint64_t generation{ 0 };
         };
 
-        struct SelectionAnchor
+        // A tab of the top bar: page names the external page of an External tab.
+        struct TabTarget
         {
-            std::optional<std::string> id;
-            std::size_t fallbackIndex{ 0 };
+            ConfiguratorTab tab{ ConfiguratorTab::Spawn };
+            std::uint64_t page{ 0 };
         };
 
-        struct PendingNumericEdit
-        {
-            std::string id;
-            std::size_t index{ 0 };
-            std::uint64_t target{ kInvalidRightHorizontalTarget };
-            double value{ 0.0 };
-        };
-
-        struct ModSettings {
-            IniSettingsStore store;
-            bool loaded = false;
-            bool available = false;
-            std::uint64_t identity = 0;
-            SelectionAnchor anchor;
-            std::size_t activeIndex = 0;
-        };
-        std::array<ModSettings, kRpsMods.size()> s_modSettings{
-            ModSettings{IniSettingsStore({}, RpsMod::Paper)},
-            ModSettings{IniSettingsStore({}, RpsMod::Csah)},
-            ModSettings{IniSettingsStore({}, RpsMod::Diamond)},
-            ModSettings{IniSettingsStore({}, RpsMod::Emitters)},
-            ModSettings{IniSettingsStore({}, RpsMod::Scissors)},
-            ModSettings{IniSettingsStore({}, RpsMod::ScissorsDeveloper)},
-            ModSettings{IniSettingsStore({}, RpsMod::RpsUi)}
-        };
-        std::size_t s_modIndex = 0;
-        ModSettings& activeSettings() { return s_modSettings[s_modIndex]; }
         SpawnBrowser s_spawnBrowser;
         ConsoleTab s_consoleTab;
         std::atomic_bool s_consoleKeyboardHeld = false;
@@ -151,17 +100,15 @@ namespace rpsui::settings_menu
         float s_spawnItemScroll = 0.0f;
         std::atomic<SpawnSearchField> s_spawnSearchField{ SpawnSearchField::None };
         std::mutex s_runtimeMutex;
-        std::string s_statusMessage;
-        std::optional<PendingNumericEdit> s_pendingNumericEdit;
 
-        std::atomic<ConfiguratorTab> s_activeTab{ ConfiguratorTab::Settings };
+        std::atomic<ConfiguratorTab> s_activeTab{ ConfiguratorTab::Spawn };
         std::atomic_uint64_t s_externalPage{ 0 };
-        bool s_previewFineTuning = false; // Preview captures only.
+        // Guarded by s_runtimeMutex: the menu has opened once, so it reopens on its last tab.
+        bool s_openedBefore = false;
         // A Back press offered to the open external page first (render thread only).
         bool s_externalBack = false;
         std::atomic_bool s_panelOpen = false;
         std::atomic_uint64_t s_closedCount{ 0 };
-        std::atomic_bool s_settingsRefreshQueued = false;
         std::atomic_bool s_panelOpening = false;
         std::atomic<float> s_sessionPanelPhysicalWidth{
             devui::render::kDefaultPanelPhysicalWidth
@@ -187,107 +134,6 @@ namespace rpsui::settings_menu
         std::atomic_uint64_t s_actionQueueFullDrops{ 0 };
 
         void drainRuntimeActions();
-
-        void hashByte(std::uint64_t& hash, std::uint8_t value) noexcept
-        {
-            hash ^= value;
-            hash *= kSemanticFnvPrime;
-        }
-
-        void hashUint64(std::uint64_t& hash, std::uint64_t value) noexcept
-        {
-            for (unsigned shift = 0; shift < 64; shift += 8) {
-                hashByte(hash, static_cast<std::uint8_t>(value >> shift));
-            }
-        }
-
-        void hashString(std::uint64_t& hash, std::string_view value) noexcept
-        {
-            hashUint64(hash, value.size());
-            for (const char character : value) {
-                hashByte(hash, static_cast<std::uint8_t>(character));
-            }
-        }
-
-        template <class Store>
-        [[nodiscard]] std::uint64_t settingsIdentity(const Store& store, bool loaded)
-        {
-            std::uint64_t identity = kSemanticFnvOffset;
-            hashByte(identity, loaded ? 1 : 0);
-            if (!loaded) {
-                return identity;
-            }
-            const auto& settings = store.settings();
-            hashUint64(identity, settings.size());
-            for (std::size_t index = 0; index < settings.size(); ++index) {
-                hashString(identity, settings[index].id);
-                hashByte(identity, static_cast<std::uint8_t>(settings[index].type));
-                hashByte(identity, static_cast<std::uint8_t>(settings[index].control.kind));
-                hashByte(identity, settings[index].control.bounded ? 1 : 0);
-                hashByte(identity, store.isSlider(index) ? 1 : 0);
-            }
-            return identity;
-        }
-
-        [[nodiscard]] std::uint64_t selectedIdentity(
-            std::uint64_t identity,
-            std::size_t index) noexcept
-        {
-            hashUint64(identity, index);
-            return identity & kSettingTargetIdentityMask;
-        }
-
-        [[nodiscard]] std::uint64_t settingTargetLocked(std::size_t index) noexcept
-        {
-            auto identity = activeSettings().identity;
-            hashUint64(identity, s_modIndex);
-            return selectedIdentity(identity, index);
-        }
-
-        template <class Store>
-        [[nodiscard]] bool readStoreLocked(
-            Store& store,
-            bool& loaded,
-            std::size_t& activeIndex,
-            SelectionAnchor& anchor,
-            std::uint64_t& identity,
-            bool reload)
-        {
-            const auto& previous = store.settings();
-            if (activeIndex < previous.size()) {
-                anchor.id = previous[activeIndex].id;
-                anchor.fallbackIndex = activeIndex;
-            }
-            const auto previousError = store.lastError();
-            const bool wasLoaded = loaded;
-            loaded = reload ? store.reload() : store.load();
-            if (!loaded && (wasLoaded || previousError != store.lastError())) {
-                logger::warn("Settings menu load failed: path='{}' error='{}' thread={}",
-                    store.path().string(), store.lastError(), GetCurrentThreadId());
-            } else if (loaded && !wasLoaded) {
-                logger::info("Settings menu catalog loaded: path='{}' settings={} thread={}",
-                    store.path().string(), store.settings().size(), GetCurrentThreadId());
-            }
-            const auto& settings = store.settings();
-            if (!loaded || settings.empty()) {
-                activeIndex = 0;
-            } else {
-                const auto anchored = anchor.id ? store.indexForId(*anchor.id) : std::nullopt;
-                activeIndex = anchored ? *anchored :
-                    (std::min)(anchor.fallbackIndex, settings.size() - 1);
-                anchor.id = settings[activeIndex].id;
-                anchor.fallbackIndex = activeIndex;
-            }
-            identity = settingsIdentity(store, loaded);
-            return loaded;
-        }
-
-        [[nodiscard]] bool readActiveStoreLocked(bool reload)
-        {
-            s_pendingNumericEdit.reset();
-            return readStoreLocked(
-                activeSettings().store, activeSettings().loaded, activeSettings().activeIndex, activeSettings().anchor, activeSettings().identity, reload);
-        }
 
         [[nodiscard]] bool spawnTabActive() noexcept
         {
@@ -320,47 +166,6 @@ namespace rpsui::settings_menu
             s_spawnBrowser.setItemSearch(s_spawnItemSearch.text());
         }
 
-        void updateSettingsStatusLocked()
-        {
-            s_statusMessage = activeSettings().loaded ?
-                modInfo(static_cast<RpsMod>(s_modIndex)).applyHint :
-                activeSettings().store.lastError();
-        }
-
-#ifdef RPSUI_SETTINGS_MENU_PREVIEW
-        std::array<bool, kRpsMods.size()> s_previewPresent{};
-#endif
-
-        [[nodiscard]] bool modPresentLocked(std::size_t index) noexcept
-        {
-#ifndef RPSUI_SETTINGS_MENU_PREVIEW
-            // F4SEVR unloads rejected plugins. Inspect loaded modules, not files in MO2.
-            return configurationModLoaded(kRpsMods[index].id);
-#else
-            return s_previewPresent[index];
-#endif
-        }
-
-        void loadRpsSettingsLocked(bool reloadLoaded)
-        {
-            s_pendingNumericEdit.reset();
-            for (std::size_t i = 0; i < s_modSettings.size(); ++i) {
-                auto& settings = s_modSettings[i];
-                settings.available = modPresentLocked(i);
-                if (settings.available)
-                    (void)readStoreLocked(settings.store, settings.loaded, settings.activeIndex,
-                        settings.anchor, settings.identity, reloadLoaded && settings.loaded);
-                else settings.loaded = false;
-            }
-            if (!activeSettings().available) {
-                for (const auto mod : kRpsModDisplayOrder) {
-                    const auto i=static_cast<std::size_t>(mod);
-                    if (s_modSettings[i].available) { s_modIndex = i; break; }
-                }
-            }
-            updateSettingsStatusLocked();
-        }
-
         void invalidateQueuedRuntimeActions()
         {
             std::scoped_lock lock(s_actionMutex);
@@ -375,7 +180,6 @@ namespace rpsui::settings_menu
             s_actionReadIndex = 0;
             s_actionWriteIndex = 0;
             s_actionCount = 0;
-            s_settingsRefreshQueued.store(false);
         }
 
         bool publishPanelToRenderer(const PanelPose& pose) noexcept
@@ -391,31 +195,44 @@ namespace rpsui::settings_menu
             return devui::render::SetPanelOpen(true, &nativePose);
         }
 
+        void setActiveTabLocked(ConfiguratorTab tab);
+
+        // The menu's first tab: the first page another mod added (RobCo PALM's Wheel items),
+        // else the Spawner.
+        [[nodiscard]] TabTarget homeTab()
+        {
+            const auto pages = external_pages::tabs();
+            return pages.empty() ? TabTarget{ ConfiguratorTab::Spawn, 0 } : TabTarget{ ConfiguratorTab::External, pages.front().handle };
+        }
+
+        [[nodiscard]] bool showingTab(const TabTarget& target) noexcept
+        {
+            return s_activeTab.load(std::memory_order_acquire) == target.tab &&
+                   (target.tab != ConfiguratorTab::External || s_externalPage.load(std::memory_order_acquire) == target.page);
+        }
+
+        void showTabLocked(const TabTarget& target)
+        {
+            if (target.tab == ConfiguratorTab::External) s_externalPage.store(target.page, std::memory_order_release);
+            setActiveTabLocked(target.tab);
+        }
+
         void openPanelLocked(const RuntimeAction& action)
         {
             struct OpeningFinished {~OpeningFinished(){s_panelOpening.store(false);}} openingFinished;
-            if (s_panelOpen.load(std::memory_order_acquire)) {
-                return;
-            }
-            if (!s_providerInputReady.load(std::memory_order_acquire)) {
-                s_statusMessage = "ROCK provider is not ready for configurator input";
-                return;
-            }
-            if (!action.hasPanelPose) {
-                s_statusMessage = "Open the workshop from the wheel";
+            if (s_panelOpen.load(std::memory_order_acquire) || !s_providerInputReady.load(std::memory_order_acquire) ||
+                !action.hasPanelPose) {
                 return;
             }
 
-            loadRpsSettingsLocked(true);
-            s_pendingNumericEdit.reset();
-            if (spawnTabActive() && !s_spawnBrowser.ensureIndexBuilt()) {
-                s_statusMessage = s_spawnBrowser.lastResult();
-            }
+            // It opens on its home tab the first time, then on the tab it was closed on.
+            if (!std::exchange(s_openedBefore, true)) showTabLocked(homeTab());
+            if (spawnTabActive()) (void)s_spawnBrowser.ensureIndexBuilt();
 
             s_hoveredResizeHandle.store(panel_resize::Handle::None, std::memory_order_release);
             s_activeResizeHandle.store(panel_resize::Handle::None, std::memory_order_release);
             if (!publishPanelToRenderer(action.panelPose)) {
-                s_statusMessage = "The UI framework rejected the Config panel";
+                logger::warn("Settings menu not opened: RPS UI Framework refused its panel");
                 return;
             }
             s_panelOpen.store(true, std::memory_order_release);
@@ -437,20 +254,7 @@ namespace rpsui::settings_menu
             s_hoveredResizeHandle.store(panel_resize::Handle::None, std::memory_order_release);
             s_activeResizeHandle.store(panel_resize::Handle::None, std::memory_order_release);
             invalidateQueuedRuntimeActions();
-            s_pendingNumericEdit.reset();
-            s_statusMessage = reason ? reason : "Panel closed";
-            logger::info("Settings menu panel closed ({})", s_statusMessage);
-        }
-
-        void applySettingChangeLocked(const SettingChangeResult& result)
-        {
-            s_statusMessage = result.message.empty() ? "No change" : result.message;
-            if (result.changed && result.saved) {
-                // The desktop preview writes the files of the folder it was given, like the game.
-                (void)readActiveStoreLocked(true);
-                s_statusMessage = activeSettings().loaded ?
-                    std::format("Saved {}. {}", result.setting.key, kRpsMods[s_modIndex].applyHint) : activeSettings().store.lastError();
-            }
+            logger::info("Settings menu panel closed ({})", reason);
         }
 
         void setActiveTabLocked(ConfiguratorTab tab)
@@ -459,80 +263,8 @@ namespace rpsui::settings_menu
                 return;
             }
             s_spawnSearchField.store(SpawnSearchField::None, std::memory_order_release);
-            if (tab == ConfiguratorTab::Spawn && !s_spawnBrowser.ensureIndexBuilt()) {
-                s_statusMessage = s_spawnBrowser.lastResult();
-            }
-        }
-
-        void selectRowLocked(ConfiguratorTab tab, std::size_t index)
-        {
-            if (tab != s_activeTab.load(std::memory_order_acquire)) {
-                return;
-            }
-            switch (tab) {
-            case ConfiguratorTab::Settings:
-                if (index < activeSettings().store.settings().size()) {
-                    activeSettings().activeIndex = index;
-                }
-                break;
-            case ConfiguratorTab::Spawn:
-            case ConfiguratorTab::Console:
-            case ConfiguratorTab::External:
-                break;
-            }
-        }
-
-        [[nodiscard]] bool validatesSettingTargetLocked(const RuntimeAction& action) noexcept
-        {
-            return action.tab == ConfiguratorTab::Settings &&
-                   s_activeTab.load(std::memory_order_acquire) == ConfiguratorTab::Settings &&
-                   activeSettings().available && activeSettings().loaded && action.index < activeSettings().store.settings().size() &&
-                   action.horizontalTarget == settingTargetLocked(action.index);
-        }
-
-        void setBooleanRowLocked(const RuntimeAction& action)
-        {
-            if (!validatesSettingTargetLocked(action)) {
-                return;
-            }
-            activeSettings().activeIndex = action.index;
-            applySettingChangeLocked(activeSettings().store.setBooleanByIndex(action.index, action.value != 0));
-        }
-
-        void setNumericRowLocked(const RuntimeAction& action)
-        {
-            if (!validatesSettingTargetLocked(action)) {
-                return;
-            }
-            activeSettings().activeIndex = action.index;
-            applySettingChangeLocked(activeSettings().store.setNumericByIndex(action.index, action.numericValue));
-        }
-
-        void setOptionRowLocked(const RuntimeAction& action)
-        {
-            if (!validatesSettingTargetLocked(action) || action.value < 0) {
-                return;
-            }
-            activeSettings().activeIndex = action.index;
-            applySettingChangeLocked(activeSettings().store.setOptionByIndex(
-                action.index, static_cast<std::size_t>(action.value)));
-        }
-
-        void reloadActiveLocked(ConfiguratorTab tab)
-        {
-            if (tab != s_activeTab.load(std::memory_order_acquire)) {
-                return;
-            }
-            switch (tab) {
-            case ConfiguratorTab::Settings:
-                (void)readActiveStoreLocked(true);
-                updateSettingsStatusLocked();
-                break;
-            case ConfiguratorTab::Spawn:
-            case ConfiguratorTab::Console:
-            case ConfiguratorTab::External:
-                break;
-            }
+            // A Spawner that cannot build its index shows why in its workspace.
+            if (tab == ConfiguratorTab::Spawn) (void)s_spawnBrowser.ensureIndexBuilt();
         }
 
         void resetPanelLayoutLocked()
@@ -543,9 +275,8 @@ namespace rpsui::settings_menu
                 s_sessionPanelPhysicalWidth.store(
                     devui::render::kDefaultPanelPhysicalWidth,
                     std::memory_order_release);
-                s_statusMessage = "Panel back where it opened, at 100%";
             } else {
-                s_statusMessage = "RPS UI Framework rejected the panel reset";
+                logger::warn("Settings menu panel reset refused by RPS UI Framework");
             }
         }
 
@@ -575,44 +306,7 @@ namespace rpsui::settings_menu
                 closePanelLocked("Closed by panel button");
                 break;
             case RuntimeActionKind::UiSelectTab:
-                if (action.tab == ConfiguratorTab::External) s_externalPage.store(action.index, std::memory_order_release);
-                setActiveTabLocked(action.tab);
-                break;
-            case RuntimeActionKind::UiSelectMod:
-                if (s_activeTab.load() == ConfiguratorTab::Settings && action.index < s_modSettings.size() &&
-                    s_modSettings[action.index].available && action.index != s_modIndex) {
-                    s_modIndex = action.index;
-                    s_pendingNumericEdit.reset();
-                    invalidateQueuedRuntimeActions();
-                    updateSettingsStatusLocked();
-                }
-                break;
-            case RuntimeActionKind::UiSelectRow:
-                selectRowLocked(action.tab, action.index);
-                break;
-            case RuntimeActionKind::UiAdjustRow:
-                if (validatesSettingTargetLocked(action)) {
-                    activeSettings().activeIndex = action.index;
-                    applySettingChangeLocked(activeSettings().store.adjustByIndex(action.index, action.value));
-                }
-                break;
-            case RuntimeActionKind::UiSetBooleanRow:
-                setBooleanRowLocked(action);
-                break;
-            case RuntimeActionKind::UiSetNumericRow:
-                setNumericRowLocked(action);
-                break;
-            case RuntimeActionKind::UiSetOptionRow:
-                setOptionRowLocked(action);
-                break;
-            case RuntimeActionKind::UiRefreshSettings:
-                s_settingsRefreshQueued.store(false);
-                if (s_activeTab.load() == ConfiguratorTab::Settings) {
-                    (void)readActiveStoreLocked(true);
-                }
-                break;
-            case RuntimeActionKind::UiReload:
-                reloadActiveLocked(action.tab);
+                showTabLocked({ action.tab, action.index });
                 break;
             case RuntimeActionKind::UiResetPanelLayout:
                 resetPanelLayoutLocked();
@@ -661,12 +355,12 @@ namespace rpsui::settings_menu
                 }
                 break;
             case RuntimeActionKind::UiBack:
-                // Back closes the search keyboard first, then the item menu, then the tab.
+                // Back closes the search keyboard first, then the item menu, then goes to the
+                // home tab, and on the home tab closes the menu.
                 if (spawnTabActive() && s_spawnSearchField.exchange(SpawnSearchField::None, std::memory_order_acq_rel) != SpawnSearchField::None) break;
                 if (spawnTabActive() && s_spawnBrowser.back()) break;
-                if (s_activeTab.load(std::memory_order_acquire) != ConfiguratorTab::Settings) {
-                    s_pendingNumericEdit.reset();
-                    s_activeTab.store(ConfiguratorTab::Settings, std::memory_order_release);
+                if (const auto home = homeTab(); !showingTab(home)) {
+                    showTabLocked(home);
                 } else {
                     closePanelLocked("Closed by Config back navigation");
                 }
@@ -765,11 +459,6 @@ namespace rpsui::settings_menu
             return devui::visual::accent(alpha);
         }
 
-        [[nodiscard]] ImVec4 textColor(float alpha = 1.0f) noexcept
-        {
-            return devui::visual::text(alpha);
-        }
-
         [[nodiscard]] ImVec4 mutedColor(float alpha = 1.0f) noexcept
         {
             return devui::visual::muted(alpha);
@@ -840,11 +529,10 @@ namespace rpsui::settings_menu
             return devui::visual::navigation(label, active, badge.data());
         }
 
-        // Settings (while any mod page is available), Spawner, Console, then the pages other
-        // mods add (SettingsMenu::registerPage).
+        // Spawner, Console, then the pages other mods add (SettingsMenu::registerPage).
         struct TopBarTab
         {
-            ConfiguratorTab tab{ ConfiguratorTab::Settings };
+            ConfiguratorTab tab{ ConfiguratorTab::Spawn };
             std::uint64_t page{ 0 };
             std::string label;
         };
@@ -853,8 +541,6 @@ namespace rpsui::settings_menu
         [[nodiscard]] std::vector<TopBarTab> topBarTabs()
         {
             std::vector<TopBarTab> tabs;
-            if (std::any_of(s_modSettings.begin(), s_modSettings.end(), [](const auto& mod) { return mod.available; }))
-                tabs.push_back({ ConfiguratorTab::Settings, 0, "Settings" });
             tabs.push_back({ ConfiguratorTab::Spawn, 0, "Spawner" });
             tabs.push_back({ ConfiguratorTab::Console, 0, "Console" });
             for (auto& page : external_pages::tabs())
@@ -930,503 +616,6 @@ namespace rpsui::settings_menu
               if (devui::visual::button(sizeLabel.data(), {126, 54})) (void)queueUiAction({.kind = RuntimeActionKind::UiResetPanelLayout}); }
             ImGui::SameLine(0, 10);
             if (devui::visual::button("X##close", {52, 54})) (void)queueUiAction({.kind = RuntimeActionKind::UiClose});
-        }
-
-        template <class Store>
-        void drawSettingsRail(
-            const Store& store,
-            bool loaded,
-            std::size_t activeIndex,
-            ConfiguratorTab tab,
-            const std::string& status)
-        {
-            devui::visual::caption(modInfo(static_cast<RpsMod>(s_modIndex)).name);
-            ImGui::Dummy({0, 12});
-            {
-                ScopedFont font(devui::render::FontRole::Body, 17);
-                if (devui::visual::button("Reload from disk", {-1, 40})) {
-                    (void)queueUiAction({.kind = RuntimeActionKind::UiReload, .tab = tab});
-                }
-            }
-            ImGui::Dummy({0, 12});
-            const auto& settings = store.settings();
-            if (!loaded || settings.empty()) {
-                ScopedFont font(devui::render::FontRole::Body, 17.0f);
-                ImGui::TextColored(mutedColor(), "%s", status.c_str());
-                return;
-            }
-            const std::string_view activeGroup =
-                activeIndex < settings.size() ? settings[activeIndex].category : std::string_view{};
-            std::string_view previous;
-            for (std::size_t index = 0; index < settings.size(); ++index) {
-                const std::string_view group = settings[index].category;
-                if (index != 0 && group == previous) {
-                    continue;
-                }
-                previous = group;
-                std::size_t groupCount = 0;
-                for (std::size_t cursor = index;
-                     cursor < settings.size() && std::string_view(settings[cursor].category) == group;
-                     ++cursor) {
-                    ++groupCount;
-                }
-                ImGui::PushID(static_cast<int>(index));
-                const std::string title(setting_help::categoryTitle(group));
-                if (navigationRow(
-                        group.empty() ? "General" : title.c_str(),
-                        groupCount,
-                        group == activeGroup)) {
-                    (void)queueUiAction({
-                        .kind = RuntimeActionKind::UiSelectRow,
-                        .tab = tab,
-                        .index = index,
-                    });
-                }
-                ImGui::PopID();
-                ImGui::Dummy({ 0.0f, 2.0f });
-            }
-        }
-
-        [[nodiscard]] const char* numericFormat(const SettingRecord& setting) noexcept
-        {
-            if (setting.type == SettingType::Integer) {
-                return "%.0f";
-            }
-            if (setting.control.step < 0.01) {
-                return "%.3f";
-            }
-            if (setting.control.step < 0.1) {
-                return "%.2f";
-            }
-            if (setting.control.step < 1.0) {
-                return "%.1f";
-            }
-            return "%.0f";
-        }
-
-        void drawSettingRow(
-            const SettingRecord& setting,
-            std::size_t index,
-            std::size_t activeIndex,
-            ConfiguratorTab tab)
-        {
-            ImGui::PushID(static_cast<int>(index));
-            const bool active = index == activeIndex;
-            constexpr float rowHeight = 66.0f;
-            // Keep rows in the scrolling window. Separate child windows can
-            // strand continuous wheel ownership on the parent when hand motion
-            // expires ImGui's wheel lock while a row is hovered.
-            const ImVec2 rowStart = ImGui::GetCursorPos();
-            const ImVec2 windowPosition = ImGui::GetCursorScreenPos();
-            const float windowWidth = ImGui::GetContentRegionAvail().x;
-            const auto rowCursor = [&](float x, float y) {
-                ImGui::SetCursorPos({rowStart.x + x, rowStart.y + y});
-            };
-            ImGui::BeginGroup();
-            ImGui::PushClipRect(windowPosition,
-                {windowPosition.x + windowWidth, windowPosition.y + rowHeight}, true);
-            const float controlsWidth = (std::min)(420.0f, windowWidth * 0.48f);
-            const float controlsStart = windowWidth - controlsWidth;
-            auto* draw = ImGui::GetWindowDrawList();
-            if (active) draw->AddRectFilled(windowPosition,
-                {windowPosition.x + windowWidth, windowPosition.y + rowHeight}, packed(accentColor(0.055f)));
-            draw->AddLine({windowPosition.x + 12, windowPosition.y + rowHeight - 1},
-                {windowPosition.x + windowWidth - 12, windowPosition.y + rowHeight - 1},
-                packed(mutedColor(0.15f)));
-            draw->PushClipRect({windowPosition.x + 12, windowPosition.y},
-                {windowPosition.x + controlsStart - 14, windowPosition.y + rowHeight}, true);
-            rowCursor(14, 8);
-            {
-                ScopedFont font(devui::render::FontRole::Medium, 25);
-                if (!setting.label.empty()) ImGui::TextUnformatted(setting.label.c_str());
-                else {
-                    const devui::visual::ReadableLabel label(setting.key, true);
-                    ImGui::TextUnformatted(label.text.data());
-                }
-            }
-            draw->PopClipRect();
-            if (ImGui::IsItemHovered()) {
-                ImGui::BeginTooltip();
-                ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30);
-                ImGui::TextUnformatted(setting.key.c_str());
-                if (!setting.description.empty()) ImGui::TextWrapped("%s", setting.description.c_str());
-                ImGui::TextDisabled("%s", setting.id.c_str());
-                ImGui::PopTextWrapPos();
-                ImGui::EndTooltip();
-            }
-            rowCursor(14, 37);
-            draw->PushClipRect({windowPosition.x + 12, windowPosition.y}, {windowPosition.x + controlsStart - 14, windowPosition.y + rowHeight}, true);
-            {
-                ScopedFont font(devui::render::FontRole::Body, 18);
-                // The setting's own line, without its title or a group heading; the tooltip has the rest.
-                const auto summary = setting_help::summary(setting.helpLines);
-                if (!summary.empty()) ImGui::TextColored(mutedColor(0.85f), "%.*s", static_cast<int>(summary.size()), summary.data());
-                else ImGui::TextColored(mutedColor(0.85f), "%s", setting.description.empty() ? setting.section.c_str() : setting.description.c_str());
-            }
-
-            draw->PopClipRect();
-            const auto settingTarget = settingTargetLocked(index);
-            switch (setting.control.kind) {
-            case setting_control::Kind::Checkbox: {
-                bool enabled = setting_control::equalsIgnoreCase(setting.value, "true") ||
-                               setting.value == "1";
-                rowCursor(windowWidth - 61.0f, 10.0f);
-                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, { 6.0f, 6.0f });
-                if (devui::visual::checkbox("##checkbox", &enabled)) {
-                    (void)queueUiAction({
-                        .kind = RuntimeActionKind::UiSetBooleanRow,
-                        .tab = tab,
-                        .value = enabled ? 1 : 0,
-                        .index = index,
-                        .horizontalTarget = settingTarget,
-                    });
-                }
-                ImGui::PopStyleVar();
-                break;
-            }
-            case setting_control::Kind::Numeric: {
-                rowCursor(controlsStart, 10.0f);
-                if (devui::visual::button("-", { 36.0f, 36.0f })) {
-                    (void)queueUiAction({
-                        .kind = RuntimeActionKind::UiAdjustRow,
-                        .tab = tab,
-                        .value = -1,
-                        .index = index,
-                        .horizontalTarget = settingTarget,
-                    });
-                }
-                ImGui::SameLine();
-                double numericValue = setting.numericValue;
-                if (s_pendingNumericEdit && s_pendingNumericEdit->id == setting.id) {
-                    numericValue = s_pendingNumericEdit->value;
-                }
-                ImGui::SetNextItemWidth(controlsWidth - 110.0f);
-                const bool changed = setting.control.bounded ?
-                    ImGui::SliderScalar(
-                        "##numeric",
-                        ImGuiDataType_Double,
-                        &numericValue,
-                        &setting.control.minimum,
-                        &setting.control.maximum,
-                        numericFormat(setting),
-                        ImGuiSliderFlags_AlwaysClamp) :
-                    ImGui::DragScalar(
-                        "##numeric",
-                        ImGuiDataType_Double,
-                        &numericValue,
-                        static_cast<float>(setting.control.step),
-                        nullptr,
-                        nullptr,
-                        numericFormat(setting));
-                if (changed) {
-                    numericValue = setting_control::snapNumeric(setting.control, numericValue);
-                    s_pendingNumericEdit = PendingNumericEdit{
-                        .id = setting.id,
-                        .index = index,
-                        .target = settingTarget,
-                        .value = numericValue,
-                    };
-                }
-                const bool commit = ImGui::IsItemDeactivatedAfterEdit() &&
-                    s_pendingNumericEdit && s_pendingNumericEdit->id == setting.id;
-                if (commit) {
-                    const auto pending = *s_pendingNumericEdit;
-                    if (!queueUiAction({
-                            .kind = RuntimeActionKind::UiSetNumericRow,
-                            .tab = tab,
-                            .index = pending.index,
-                            .horizontalTarget = pending.target,
-                            .numericValue = pending.value,
-                        })) {
-                        s_statusMessage = "Numeric change was not queued; try again";
-                    }
-                    s_pendingNumericEdit.reset();
-                }
-                ImGui::SameLine();
-                if (devui::visual::button("+", { 36.0f, 36.0f })) {
-                    (void)queueUiAction({
-                        .kind = RuntimeActionKind::UiAdjustRow,
-                        .tab = tab,
-                        .value = 1,
-                        .index = index,
-                        .horizontalTarget = settingTarget,
-                    });
-                }
-                break;
-            }
-            case setting_control::Kind::Dropdown: {
-                const char* preview = setting.value.c_str();
-                if (setting.selectedOptionIndex &&
-                    *setting.selectedOptionIndex < setting.control.options.size()) {
-                    preview = setting.control.options[*setting.selectedOptionIndex].label.c_str();
-                }
-                rowCursor(controlsStart, 10.0f);
-                ImGui::SetNextItemWidth(controlsWidth - 20.0f);
-                if (ImGui::BeginCombo("##dropdown", preview)) {
-                    for (std::size_t optionIndex = 0;
-                         optionIndex < setting.control.options.size(); ++optionIndex) {
-                        const bool selected = setting.selectedOptionIndex &&
-                            *setting.selectedOptionIndex == optionIndex;
-                        const auto& option = setting.control.options[optionIndex];
-                        if (ImGui::Selectable(option.label.c_str(), selected)) {
-                            (void)queueUiAction({
-                                .kind = RuntimeActionKind::UiSetOptionRow,
-                                .tab = tab,
-                                .value = static_cast<int>(optionIndex),
-                                .index = index,
-                                .horizontalTarget = settingTarget,
-                            });
-                        }
-                        if (selected) {
-                            ImGui::SetItemDefaultFocus();
-                        }
-                    }
-                    ImGui::EndCombo();
-                }
-                break;
-            }
-            case setting_control::Kind::Text: {
-                const ImVec2 valueMinimum{
-                    windowPosition.x + controlsStart,
-                    windowPosition.y + 16.0f
-                };
-                const ImVec2 valueMaximum{
-                    windowPosition.x + windowWidth - 20.0f,
-                    valueMinimum.y + 40.0f
-                };
-                draw->AddRectFilled(
-                    valueMinimum,
-                    valueMaximum,
-                    packed(devui::visual::surface()));
-                draw->AddRect(
-                    valueMinimum,
-                    valueMaximum,
-                    packed(rpsui::settings_menu::theme::border()));
-                draw->PushClipRect(
-                    { valueMinimum.x + 10.0f, valueMinimum.y },
-                    { valueMaximum.x - 10.0f, valueMaximum.y },
-                    true);
-                draw->AddText(
-                    fontFor(devui::render::FontRole::Mono),
-                    16.0f,
-                    { valueMinimum.x + 12.0f, valueMinimum.y + 10.0f },
-                    packed(textColor(0.82f)),
-                    setting.value.c_str());
-                draw->PopClipRect();
-                break;
-            }
-            }
-
-            ImGui::PopClipRect();
-            ImGui::EndGroup();
-            ImGui::SetCursorPos(rowStart);
-            ImGui::Dummy({windowWidth, rowHeight});
-            ImGui::PopID();
-        }
-
-        // A choice shows its options as cards: booleans, and short lists that are not button layouts.
-        [[nodiscard]] bool isChoice(const SettingRecord& setting) noexcept
-        {
-            if (setting.control.kind == setting_control::Kind::Checkbox) return true;
-            return setting.control.kind == setting_control::Kind::Dropdown &&
-                   !setting.control.options.empty() && setting.control.options.size() <= 7;
-        }
-
-        // One option of a choice: its name and, under it, the line the mod wrote for it.
-        [[nodiscard]] bool choiceCard(const char* label, std::string_view line, bool chosen, ImVec2 size)
-        {
-            const auto start = ImGui::GetCursorScreenPos();
-            const bool pressed = ImGui::InvisibleButton("##card", size);
-            const bool hovered = ImGui::IsItemHovered();
-            const auto& theme = rpsui::settings_menu::theme::current();
-            auto* draw = ImGui::GetWindowDrawList();
-            const ImVec2 end{ start.x + size.x, start.y + size.y };
-            const float rounding = (std::max)(theme.rounding, 6.0f);
-            const auto fill = chosen ? accentColor(0.18f) :
-                hovered ? rpsui::settings_menu::theme::role(theme.hover, 0.85f) : devui::visual::surface(0.75f);
-            draw->AddRectFilled(start, end, packed(fill), rounding);
-            draw->AddRect(start, end, packed(chosen ? accentColor() : rpsui::settings_menu::theme::border()), rounding,
-                chosen ? (std::max)(2.0f, theme.borderWidth * 2.0f) : theme.borderWidth);
-            draw->PushClipRect(start, end, true);
-            auto* medium = fontFor(devui::render::FontRole::Medium);
-            draw->AddText(medium, 23.0f, { start.x + 16.0f, start.y + 12.0f }, packed(chosen ? accentColor() : textColor(1.0f)), label);
-            if (!line.empty()) {
-                // Help lines continue a sentence after "label: "; a card starts it.
-                std::string text(line);
-                if (text[0] >= 'a' && text[0] <= 'z') text[0] = static_cast<char>(text[0] - 'a' + 'A');
-                draw->AddText(fontFor(devui::render::FontRole::Body), 18.0f, { start.x + 16.0f, start.y + 44.0f },
-                    packed(mutedColor(0.95f)), text.c_str(), nullptr, size.x - 32.0f);
-            }
-            draw->PopClipRect();
-            return pressed;
-        }
-
-        void drawChoice(const SettingRecord& setting, std::size_t index, ConfiguratorTab tab)
-        {
-            namespace help = setting_help;
-            ImGui::PushID(static_cast<int>(index));
-            const std::span<const std::string> lines(setting.helpLines);
-            const auto title = help::title(lines);
-            {
-                ScopedFont font(devui::render::FontRole::Medium, 26);
-                if (!title.empty()) ImGui::TextUnformatted(title.data(), title.data() + title.size());
-                else if (!setting.label.empty()) ImGui::TextUnformatted(setting.label.c_str());
-                else {
-                    const devui::visual::ReadableLabel label(setting.key, true);
-                    ImGui::TextUnformatted(label.text.data());
-                }
-            }
-            if (ImGui::IsItemHovered() && !setting.description.empty()) {
-                ImGui::BeginTooltip();
-                ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30);
-                ImGui::TextWrapped("%s", setting.description.c_str());
-                ImGui::TextDisabled("%s", setting.id.c_str());
-                ImGui::PopTextWrapPos();
-                ImGui::EndTooltip();
-            }
-            const bool toggle = setting.control.kind == setting_control::Kind::Checkbox;
-            const auto summary = help::summary(lines);
-            if (!toggle && !summary.empty()) {
-                ScopedFont font(devui::render::FontRole::Body, 18);
-                ImGui::PushStyleColor(ImGuiCol_Text, mutedColor(0.95f));
-                ImGui::TextWrapped("%.*s", static_cast<int>(summary.size()), summary.data());
-                ImGui::PopStyleColor();
-            }
-            ImGui::Dummy({ 0.0f, 4.0f });
-
-            struct Card { std::string label; std::string_view line; bool chosen; int value; };
-            std::vector<Card> cards;
-            if (toggle) {
-                const bool on = setting_control::equalsIgnoreCase(setting.value, "true") || setting.value == "1";
-                cards.push_back({ "On", summary, on, 1 });
-                cards.push_back({ "Off", help::offLine(lines), !on, 0 });
-            } else {
-                for (std::size_t option = 0; option < setting.control.options.size(); ++option) {
-                    // Lists read from "N = label" carry "N — label"; a card shows the label alone.
-                    const auto& choice = setting.control.options[option];
-                    const std::string numbered = choice.value + " — ";
-                    const std::string label = choice.label.starts_with(numbered) ? choice.label.substr(numbered.size()) : choice.label;
-                    cards.push_back({ label, help::choiceLine(lines, label),
-                        setting.selectedOptionIndex && *setting.selectedOptionIndex == option, static_cast<int>(option) });
-                }
-            }
-            const bool described = std::ranges::any_of(cards, [](const Card& card) { return !card.line.empty(); });
-            constexpr float gap = 12.0f;
-            const float width = ImGui::GetContentRegionAvail().x - 6.0f;
-            const std::size_t columns = described ? (std::min<std::size_t>)(cards.size(), 3) : (std::min<std::size_t>)(cards.size(), 4);
-            const float cardWidth = (width - gap * static_cast<float>(columns - 1)) / static_cast<float>(columns);
-            // Every card of a choice is as tall as its longest line needs.
-            float cardHeight = 56.0f;
-            if (described) {
-                auto* body = fontFor(devui::render::FontRole::Body);
-                for (const auto& card : cards) {
-                    if (card.line.empty()) continue;
-                    const float text = body->CalcTextSizeA(18.0f, FLT_MAX, cardWidth - 32.0f, card.line.data(), card.line.data() + card.line.size()).y;
-                    cardHeight = (std::max)(cardHeight, 44.0f + text + 16.0f);
-                }
-            }
-            const auto target = settingTargetLocked(index);
-            for (std::size_t i = 0; i < cards.size(); ++i) {
-                if (i % columns) ImGui::SameLine(0.0f, gap);
-                ImGui::PushID(static_cast<int>(i));
-                if (choiceCard(cards[i].label.c_str(), cards[i].line, cards[i].chosen, { cardWidth, cardHeight }) && !cards[i].chosen) {
-                    (void)queueUiAction({
-                        .kind = toggle ? RuntimeActionKind::UiSetBooleanRow : RuntimeActionKind::UiSetOptionRow,
-                        .tab = tab,
-                        .value = cards[i].value,
-                        .index = index,
-                        .horizontalTarget = target,
-                    });
-                }
-                ImGui::PopID();
-                if (i + 1 < cards.size() && (i + 1) % columns == 0) ImGui::Dummy({ 0.0f, gap - ImGui::GetStyle().ItemSpacing.y });
-            }
-            ImGui::PopID();
-        }
-
-        // The fold over a page's numbers and text. True when pressed.
-        [[nodiscard]] bool fineTuningHeader(std::size_t count, bool open)
-        {
-            ImGui::Dummy({ 0.0f, 6.0f });
-            const auto start = ImGui::GetCursorScreenPos();
-            const ImVec2 size{ ImGui::GetContentRegionAvail().x - 6.0f, 54.0f };
-            const bool pressed = ImGui::InvisibleButton("##fine-tuning", size);
-            const bool hovered = ImGui::IsItemHovered();
-            const auto& theme = rpsui::settings_menu::theme::current();
-            auto* draw = ImGui::GetWindowDrawList();
-            const ImVec2 end{ start.x + size.x, start.y + size.y };
-            const float rounding = (std::max)(theme.rounding, 6.0f);
-            draw->AddRectFilled(start, end, packed(hovered ? rpsui::settings_menu::theme::role(theme.hover, 0.85f) : devui::visual::surface(0.6f)), rounding);
-            draw->AddRect(start, end, packed(rpsui::settings_menu::theme::border()), rounding, theme.borderWidth);
-            const float y = start.y + size.y * 0.5f;
-            const ImVec2 mark{ start.x + 26.0f, y };
-            if (open) draw->AddTriangleFilled({ mark.x - 8, y - 4 }, { mark.x + 8, y - 4 }, { mark.x, y + 6 }, packed(accentColor()));
-            else draw->AddTriangleFilled({ mark.x - 4, y - 8 }, { mark.x - 4, y + 8 }, { mark.x + 6, y }, packed(accentColor()));
-            draw->AddText(fontFor(devui::render::FontRole::Medium), 22.0f, { start.x + 46.0f, y - 12.0f }, packed(textColor(1.0f)), "Fine-tuning");
-            const auto detail = std::format("{} value{}, for adjusting", count, count == 1 ? "" : "s");
-            draw->AddText(fontFor(devui::render::FontRole::Body), 18.0f, { start.x + 190.0f, y - 10.0f }, packed(mutedColor(0.9f)), detail.c_str());
-            ImGui::Dummy({ 0.0f, 6.0f });
-            return pressed;
-        }
-
-        template <class Store>
-        void drawSettingsWorkspace(
-            const Store& store,
-            bool loaded,
-            std::size_t activeIndex,
-            ConfiguratorTab tab,
-            const std::string& status)
-        {
-            const auto& settings = store.settings();
-            if (!loaded || settings.empty()) {
-                {
-                    ScopedFont heading(devui::render::FontRole::Heading, 27.0f);
-                    ImGui::TextColored(accentColor(), "NO DATA");
-                }
-                {
-                    ScopedFont body(devui::render::FontRole::Body, 17.0f);
-                    ImGui::TextWrapped("%s", status.c_str());
-                }
-                return;
-            }
-            const std::string_view group =
-                activeIndex < settings.size() ? settings[activeIndex].category : std::string_view{};
-            const std::string groupTitle(group.empty() ? std::string_view("General") : setting_help::categoryTitle(group));
-            devui::visual::heading(groupTitle.c_str(), status.c_str());
-            ImGui::Dummy({ 0.0f, 6.0f });
-            ImGui::BeginChild("settings-rows", { 0.0f, 0.0f }, ImGuiChildFlags_None);
-            const auto groupId = ImGui::GetID(group.data(), group.data() + group.size());
-            auto* storage = ImGui::GetStateStorage();
-            const auto groupKey = ImGui::GetID("current-group");
-            if (storage->GetInt(groupKey) != static_cast<int>(groupId)) {
-                ImGui::SetScrollY(0);
-                storage->SetInt(groupKey, static_cast<int>(groupId));
-            }
-            // Choices first, as the setup wizard shows them; numbers and text under Fine-tuning.
-            std::vector<std::size_t> choices, values;
-            for (std::size_t index = 0; index < settings.size(); ++index) {
-                if (std::string_view(settings[index].category) != group) continue;
-                (isChoice(settings[index]) ? choices : values).push_back(index);
-            }
-            for (const auto index : choices) {
-                drawChoice(settings[index], index, tab);
-                ImGui::Dummy({ 0.0f, 14.0f });
-            }
-            if (!values.empty()) {
-                const auto foldKey = ImGui::GetID("fine-tuning");
-                bool open = choices.empty() || storage->GetBool(foldKey, false) || s_previewFineTuning;
-                if (!choices.empty() && fineTuningHeader(values.size(), open)) {
-                    open = !open;
-                    storage->SetBool(foldKey, open);
-                }
-                if (open) {
-                    for (const auto index : values) {
-                        drawSettingRow(settings[index], index, activeIndex, tab);
-                        ImGui::Dummy({ 0.0f, 3.0f });
-                    }
-                }
-            }
-            ImGui::EndChild();
         }
 
         // A search line. Clicking it opens the keyboard panel under Config, or closes it again;
@@ -1579,7 +768,11 @@ namespace rpsui::settings_menu
                 ImGui::BeginChild("external-page", available, ImGuiChildFlags_None);
                 const bool drawn = external_pages::draw(s_externalPage.load(std::memory_order_acquire), available.x, available.y, back, usedBack);
                 ImGui::EndChild();
-                if (!drawn) (void)queueUiAction({ .kind = RuntimeActionKind::UiSelectTab, .tab = ConfiguratorTab::Settings });
+                if (!drawn) {
+                    // Its mod removed the page: the menu goes to its home tab.
+                    const auto home = homeTab();
+                    (void)queueUiAction({ .kind = RuntimeActionKind::UiSelectTab, .tab = home.tab, .index = home.page });
+                }
                 else if (back && !usedBack) (void)queueUiAction({ .kind = RuntimeActionKind::UiBack });
                 return;
             }
@@ -1593,58 +786,22 @@ namespace rpsui::settings_menu
                 if (s_consoleTab.hasCommands() || s_consoleTab.hasReloadRequest()) s_consoleCommandsPending.store(true, std::memory_order_release);
                 return;
             }
-            const float railWidth = devui::visual::railWidth(ImGui::GetContentRegionAvail().x);
-            const auto tab = s_activeTab.load(std::memory_order_acquire);
-            if (tab == ConfiguratorTab::Settings) {
-                ImGui::BeginChild("rps-mod-tabs", {0, 64});
-                const auto visible=static_cast<float>(std::count_if(s_modSettings.begin(),s_modSettings.end(),[](const auto& settings){return settings.available;}));
-                const float chipWidth=(std::min)(156.f,(ImGui::GetContentRegionAvail().x-36.f-12.f*(std::max)(0.f,visible-1.f))/(std::max)(1.f,visible));
-                ImGui::SetCursorPos({18, 4});
-                bool first = true;
-                for (const auto mod : kRpsModDisplayOrder) {
-                    const auto i=static_cast<std::size_t>(mod);
-                    if (!s_modSettings[i].available) continue;
-                    if (!first) ImGui::SameLine(0, 12);
-                    first = false;
-                    if (tabChip(kRpsMods[i].name, s_modIndex == i, {chipWidth, 52}))
-                        (void)queueUiAction({.kind = RuntimeActionKind::UiSelectMod, .index = i});
-                }
-                if (first) ImGui::TextUnformatted("No supported RPS mods are loaded.");
-                ImGui::EndChild();
-                if (!activeSettings().available) return;
-            }
-            // Keep row/scroll/widget identities independent even for identical INI keys.
-            ImGui::PushID(tab == ConfiguratorTab::Settings ? static_cast<int>(s_modIndex) : -1);
+            // The Spawner: its item sources on the rail, the items beside them.
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 18.0f, 24.0f });
             ImGui::PushStyleColor(ImGuiCol_ChildBg, devui::visual::surface(0.7f));
             ImGui::PushStyleColor(ImGuiCol_Border, rpsui::settings_menu::theme::border());
-            ImGui::BeginChild("rail", { railWidth, 0.0f }, ImGuiChildFlags_AlwaysUseWindowPadding);
-            switch (tab) {
-            case ConfiguratorTab::Settings:
-                drawSettingsRail(activeSettings().store, activeSettings().loaded, activeSettings().activeIndex, tab, s_statusMessage);
-                break;
-            case ConfiguratorTab::Spawn:
-                drawSpawnRail();
-                break;
-            }
+            ImGui::BeginChild("rail", { devui::visual::railWidth(ImGui::GetContentRegionAvail().x), 0.0f }, ImGuiChildFlags_AlwaysUseWindowPadding);
+            drawSpawnRail();
             ImGui::EndChild();
             ImGui::PopStyleColor(2);
             ImGui::SameLine(0,0);
             ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0,0,0,0));
             ImGui::PushStyleColor(ImGuiCol_Border, rpsui::settings_menu::theme::border());
             ImGui::BeginChild("workspace", { 0.0f, 0.0f }, ImGuiChildFlags_AlwaysUseWindowPadding);
-            switch (tab) {
-            case ConfiguratorTab::Settings:
-                drawSettingsWorkspace(activeSettings().store, activeSettings().loaded, activeSettings().activeIndex, tab, s_statusMessage);
-                break;
-            case ConfiguratorTab::Spawn:
-                drawSpawnWorkspace();
-                break;
-            }
+            drawSpawnWorkspace();
             ImGui::EndChild();
             ImGui::PopStyleColor(2);
             ImGui::PopStyleVar();
-            ImGui::PopID();
         }
 
         void drawResizeChrome()
@@ -1736,10 +893,6 @@ namespace rpsui::settings_menu
         }
 
         try {
-            if (s_activeTab.load() == ConfiguratorTab::Settings && !s_pendingNumericEdit &&
-                activeSettings().store.needsReload() && !s_settingsRefreshQueued.exchange(true)) {
-                if (!queueUiAction({.kind = RuntimeActionKind::UiRefreshSettings})) s_settingsRefreshQueued.store(false);
-            }
             ScopedFont configFont(devui::render::FontRole::Body, 26);
             ImGui::SetNextWindowPos(ImVec2(x, y), ImGuiCond_Always);
             if (backRequested) {
@@ -1748,7 +901,6 @@ namespace rpsui::settings_menu
                     ImGui::ClosePopupToLevel(context.OpenPopupStack.Size - 1, true);
                 } else if (context.ActiveId != 0) {
                     ImGui::ClearActiveID();
-                    s_pendingNumericEdit.reset();
                 } else if (s_activeTab.load(std::memory_order_acquire) == ConfiguratorTab::External) {
                     s_externalBack = true;
                 } else {
@@ -1950,12 +1102,6 @@ namespace rpsui::settings_menu
 
     }
 
-    void onGameSessionReady()
-    {
-        std::scoped_lock lock(s_runtimeMutex);
-        loadRpsSettingsLocked(false);
-    }
-
     bool isOpen() noexcept { return s_panelOpen.load(std::memory_order_acquire); }
     bool isOpening() noexcept { return s_panelOpening.load(std::memory_order_acquire); }
     std::uint64_t closedCount() noexcept { return s_closedCount.load(std::memory_order_acquire); }
@@ -1991,64 +1137,23 @@ namespace rpsui::settings_menu
     }
 
 #ifdef RPSUI_SETTINGS_MENU_PREVIEW
-    void initializeFilePreview(const std::filesystem::path& folder)
+    void initializePreview()
     {
         std::scoped_lock lock(s_runtimeMutex);
         invalidateQueuedRuntimeActions();
-        s_activeTab = ConfiguratorTab::Settings;
-        s_previewPresent.fill(false);
-        for (std::size_t i = 0; i < s_modSettings.size(); ++i) {
-            const auto id = kRpsMods[i].id;
-            const bool file = id == RpsMod::Paper || id == RpsMod::RpsUi;
-            // A Mods_Config folder keeps each mod's file in the mod's own folder.
-            const auto leaf = std::filesystem::path(kRpsMods[i].directory).filename();
-            std::error_code error;
-            auto path = file ? folder / leaf / kRpsMods[i].ini : std::filesystem::path{};
-            if (file && !std::filesystem::is_regular_file(path, error)) path = folder / kRpsMods[i].ini;
-            s_modSettings[i] = ModSettings{ IniSettingsStore(path, id) };
-            s_modSettings[i].store.allowPreviewWrites();
-            s_previewPresent[i] = file && std::filesystem::is_regular_file(path, error);
-        }
-        s_modIndex = static_cast<std::size_t>(RpsMod::Paper);
         s_providerInputReady.store(true);
-        loadRpsSettingsLocked(false);
-        s_spawnBrowser.ensureIndexBuilt();
-    }
-
-    void previewShow(std::string_view mod, std::string_view category)
-    {
-        std::scoped_lock lock(s_runtimeMutex);
-        s_activeTab = ConfiguratorTab::Settings;
-        for (std::size_t i = 0; i < s_modSettings.size(); ++i) {
-            if (kRpsMods[i].name != mod || !s_modSettings[i].available) continue;
-            s_modIndex = i;
-            const auto& settings = s_modSettings[i].store.settings();
-            for (std::size_t index = 0; index < settings.size(); ++index) {
-                if (setting_help::categoryTitle(settings[index].category).find(category) != std::string_view::npos) {
-                    s_modSettings[i].activeIndex = index;
-                    break;
-                }
-            }
-        }
-        updateSettingsStatusLocked();
+        (void)s_spawnBrowser.ensureIndexBuilt();
     }
 
     void previewShowTab(std::string_view tab)
     {
         std::scoped_lock lock(s_runtimeMutex);
-        setActiveTabLocked(tab == "Spawner" ? ConfiguratorTab::Spawn : tab == "Console" ? ConfiguratorTab::Console : ConfiguratorTab::Settings);
+        setActiveTabLocked(tab == "Console" ? ConfiguratorTab::Console : ConfiguratorTab::Spawn);
     }
-
-    void previewOpenFineTuning(bool open) { s_previewFineTuning = open; }
 
     void previewKeys(std::span<const ConsoleKeyEvent> keys) { serviceConsole(!keys.empty(), true, keys); }
 
     void setPreviewOpen(bool open) { s_panelOpen.store(open); }
-    float previewTabCenterX(unsigned index, float width)
-    {
-        const auto slot = topBarSlots(width, topBarTabs())[index];
-        return slot.x + slot.width * 0.5f;
-    }
     void drainPreviewActions() { drainRuntimeActions(); serviceConsole(false, false, {}); }
 #endif
 

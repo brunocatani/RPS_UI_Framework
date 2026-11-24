@@ -100,41 +100,24 @@ file(GLOB_RECURSE sources CONFIGURE_DEPENDS
   "${SOURCE_DIR}/*.cpp")
 source_group(TREE "${ROOT_DIR}" FILES ${headers} ${sources})
 
-# The settings menu (src/settings_menu): every mod's settings pages, the Spawner and the Console.
+# The settings menu (src/settings_menu): the Spawner, the Console and the pages other mods add.
 # It is its own library, once for the game and once for the desktop preview, which has no game.
-# It reads SCISSORS' and DIAMOND's Configuration tables, so it compiles against their public headers.
 list(FILTER headers EXCLUDE REGEX "/src/settings_menu/")
 list(FILTER sources EXCLUDE REGEX "/src/settings_menu/")
-set(SCISSORS_INCLUDE_DIR "${WORKSPACE_ROOT}/PROJECT_ROCK_V2/main_projects/SCISSORS/include"
-  CACHE PATH "SCISSORS public include directory")
-set(DIAMOND_INCLUDE_DIR "${WORKSPACE_ROOT}/PROJECT_ROCK_V2/main_projects/DIAMOND/include"
-  CACHE PATH "DIAMOND public include directory")
-foreach(dir SCISSORS_INCLUDE_DIR DIAMOND_INCLUDE_DIR)
-  if(NOT EXISTS "${${dir}}")
-    message(FATAL_ERROR "${dir} '${${dir}}' not found")
-  endif()
-endforeach()
-find_package(nlohmann_json CONFIG REQUIRED)
 set(SETTINGS_MENU_SOURCES
   src/settings_menu/ConfiguratorRuntime.cpp
   src/settings_menu/ConsoleService.cpp
   src/settings_menu/ConsoleTab.cpp
-  src/settings_menu/CsahSettings.cpp
-  src/settings_menu/DiamondSettings.cpp
   src/settings_menu/ExternalPages.cpp
-  src/settings_menu/IniSettingsStore.cpp
   src/settings_menu/MenuTheme.cpp
   src/settings_menu/render/MenuPanel.cpp
   src/settings_menu/OnScreenKeyboard.cpp
-  src/settings_menu/ScissorsSettings.cpp
-  src/settings_menu/SettingControlPolicy.cpp
   src/settings_menu/SpawnBrowser.cpp)
 foreach(target rpsui_settings_menu rpsui_settings_menu_preview)
   add_library(${target} STATIC ${SETTINGS_MENU_SOURCES})
   target_include_directories(${target} PUBLIC
-    "${SOURCE_DIR}/settings_menu" "${PUBLIC_INCLUDE_DIR}"
-    "${SCISSORS_INCLUDE_DIR}" "${DIAMOND_INCLUDE_DIR}")
-  target_link_libraries(${target} PUBLIC rpsui_imgui spdlog::spdlog nlohmann_json::nlohmann_json shell32.lib)
+    "${SOURCE_DIR}/settings_menu" "${PUBLIC_INCLUDE_DIR}")
+  target_link_libraries(${target} PUBLIC rpsui_imgui spdlog::spdlog shell32.lib)
   target_compile_features(${target} PUBLIC cxx_std_23)
   target_compile_definitions(${target} PUBLIC UNICODE _UNICODE)
   target_precompile_headers(${target} PRIVATE src/settings_menu/PCH.h)
@@ -205,27 +188,18 @@ if(POST_BUILD_COPY_PLUGIN)
   endforeach()
 endif()
 
-# RPSUISettingsPreview: the settings menu on the desktop, without the game (preview/). Its
-# sandbox starts from the mods' example settings files, copied beside it; with
+# RPSUISettingsPreview: the settings menu on the desktop, without the game (preview/). With
 # RPSUI_SETTINGS_PREVIEW_COPY_PATH set, the build also copies it there to open it from.
 set(RPSUI_SETTINGS_PREVIEW_COPY_PATH "" CACHE PATH
   "Folder the settings menu preview is copied to after each build; empty for none.")
-set(PAPER_CONFIG_DIR "${WORKSPACE_ROOT}/PROJECT_ROCK_V2/main_projects/PAPER/data/config"
-  CACHE PATH "PAPER's example settings files")
 add_executable(RPSUISettingsPreview WIN32 preview/SettingsMenuPreview.cpp)
 target_link_libraries(RPSUISettingsPreview PRIVATE rpsui_settings_menu_preview d3d11.lib dxgi.lib shell32.lib ole32.lib windowscodecs.lib)
 target_compile_definitions(RPSUISettingsPreview PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_options(RPSUISettingsPreview PRIVATE /utf-8)
-set(SETTINGS_PREVIEW_EXAMPLES
-  "${PAPER_CONFIG_DIR}/PAPER_example.toml")
-add_custom_command(TARGET RPSUISettingsPreview POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:RPSUISettingsPreview>/examples"
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SETTINGS_PREVIEW_EXAMPLES} "$<TARGET_FILE_DIR:RPSUISettingsPreview>/examples/")
 if(NOT RPSUI_SETTINGS_PREVIEW_COPY_PATH STREQUAL "")
   add_custom_command(TARGET RPSUISettingsPreview POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${RPSUI_SETTINGS_PREVIEW_COPY_PATH}/examples"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${RPSUI_SETTINGS_PREVIEW_COPY_PATH}"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:RPSUISettingsPreview>" "${RPSUI_SETTINGS_PREVIEW_COPY_PATH}/"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SETTINGS_PREVIEW_EXAMPLES} "${RPSUI_SETTINGS_PREVIEW_COPY_PATH}/examples/"
     COMMENT "Settings menu preview in '${RPSUI_SETTINGS_PREVIEW_COPY_PATH}'")
 endif()
 add_dependencies(${PROJECT_NAME} RPSUISettingsPreview)
@@ -318,69 +292,15 @@ if(RPS_UI_FRAMEWORK_BUILD_TESTS)
   target_include_directories(RPSUIDiscoveryTests PRIVATE "${SOURCE_DIR}" "${PUBLIC_INCLUDE_DIR}")
   add_test(NAME RPSUIFramework.Discovery COMMAND RPSUIDiscoveryTests)
 
-  # The settings menu: its stores against stub provider DLLs (named as the real mods, so the
-  # stores find them as loaded modules) and its pure policies. Runtime and Preview variants
-  # cover the game's and the desktop preview's paths through the same sources.
-  set(SETTINGS_MENU_TEST_DIR "${ROOT_DIR}/tests/settings_menu")
-  set(SETTINGS_MENU_STORE_SOURCES
-    src/settings_menu/IniSettingsStore.cpp src/settings_menu/ScissorsSettings.cpp
-    src/settings_menu/CsahSettings.cpp src/settings_menu/DiamondSettings.cpp src/settings_menu/SettingControlPolicy.cpp)
-  function(settings_menu_test target)
-    add_executable(${target} ${ARGN})
-    target_include_directories(${target} PRIVATE "${SOURCE_DIR}/settings_menu"
-      "${SCISSORS_INCLUDE_DIR}" "${DIAMOND_INCLUDE_DIR}" "${PUBLIC_INCLUDE_DIR}")
-    target_compile_features(${target} PRIVATE cxx_std_23)
-    target_compile_definitions(${target} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-    target_compile_options(${target} PRIVATE /UNDEBUG /utf-8)
-    target_link_libraries(${target} PRIVATE shell32 nlohmann_json::nlohmann_json)
-  endfunction()
-  foreach(stub ScissorsConfiguration:SCISSORS DiamondConfiguration:DIAMOND EmittersModule:ROCK_Emitters)
-    string(REPLACE ":" ";" stub "${stub}")
-    list(GET stub 0 stub_source)
-    list(GET stub 1 stub_name)
-    add_library(SettingsMenu${stub_source}TestStub SHARED "${SETTINGS_MENU_TEST_DIR}/${stub_source}Stub.cpp")
-    target_include_directories(SettingsMenu${stub_source}TestStub PRIVATE
-      "${SCISSORS_INCLUDE_DIR}" "${DIAMOND_INCLUDE_DIR}")
-    target_compile_features(SettingsMenu${stub_source}TestStub PRIVATE cxx_std_23)
-    set_target_properties(SettingsMenu${stub_source}TestStub PROPERTIES OUTPUT_NAME ${stub_name} EXCLUDE_FROM_ALL TRUE
-      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test-providers")
-  endforeach()
-  foreach(mode Runtime Preview)
-    settings_menu_test(SettingsMenuScissors${mode}Tests "${SETTINGS_MENU_TEST_DIR}/ScissorsSettingsTests.cpp" ${SETTINGS_MENU_STORE_SOURCES})
-    add_dependencies(SettingsMenuScissors${mode}Tests SettingsMenuScissorsConfigurationTestStub)
-    add_test(NAME SettingsMenu.Scissors${mode}
-      COMMAND SettingsMenuScissors${mode}Tests "$<TARGET_FILE:SettingsMenuScissorsConfigurationTestStub>")
-    settings_menu_test(SettingsMenuCsah${mode}Tests "${SETTINGS_MENU_TEST_DIR}/CsahSettingsTests.cpp" ${SETTINGS_MENU_STORE_SOURCES})
-    target_compile_definitions(SettingsMenuCsah${mode}Tests PRIVATE
-      SETTINGS_MENU_CSAH_TEST_DIR="${CMAKE_CURRENT_BINARY_DIR}/csah-test-${mode}")
-    add_test(NAME SettingsMenu.Csah${mode}
-      COMMAND SettingsMenuCsah${mode}Tests "${WORKSPACE_ROOT}/graphics_mods/CSAH/settings/PALMSettings.json")
-    settings_menu_test(SettingsMenuDiamond${mode}Tests "${SETTINGS_MENU_TEST_DIR}/DiamondSettingsTests.cpp" ${SETTINGS_MENU_STORE_SOURCES})
-    add_dependencies(SettingsMenuDiamond${mode}Tests SettingsMenuDiamondConfigurationTestStub)
-    add_test(NAME SettingsMenu.Diamond${mode}
-      COMMAND SettingsMenuDiamond${mode}Tests "$<TARGET_FILE:SettingsMenuDiamondConfigurationTestStub>")
-    settings_menu_test(SettingsMenuEmitters${mode}Tests "${SETTINGS_MENU_TEST_DIR}/EmittersSettingsTests.cpp" ${SETTINGS_MENU_STORE_SOURCES})
-    add_dependencies(SettingsMenuEmitters${mode}Tests SettingsMenuEmittersModuleTestStub)
-    target_compile_definitions(SettingsMenuEmitters${mode}Tests PRIVATE
-      SETTINGS_MENU_EMITTERS_TEST_DIR="${CMAKE_CURRENT_BINARY_DIR}/emitters-test-${mode}")
-    add_test(NAME SettingsMenu.Emitters${mode}
-      COMMAND SettingsMenuEmitters${mode}Tests "$<TARGET_FILE:SettingsMenuEmittersModuleTestStub>"
-        "${WORKSPACE_ROOT}/experimental_mods/ROCK_Emitters/data/config/ROCK_Emitters_example.toml")
-  endforeach()
-  foreach(test ScissorsPreview CsahPreview DiamondPreview EmittersPreview)
-    target_compile_definitions(SettingsMenu${test}Tests PRIVATE RPSUI_SETTINGS_MENU_PREVIEW)
-  endforeach()
+  # The settings menu's pure policies.
   foreach(policy SpawnPluginIdentity PanelResizePolicy ConsoleLine ConsoleShortcuts)
-    settings_menu_test(SettingsMenu${policy}Tests "${SETTINGS_MENU_TEST_DIR}/${policy}Tests.cpp")
+    add_executable(SettingsMenu${policy}Tests "${ROOT_DIR}/tests/settings_menu/${policy}Tests.cpp")
+    target_include_directories(SettingsMenu${policy}Tests PRIVATE "${SOURCE_DIR}/settings_menu")
+    target_compile_features(SettingsMenu${policy}Tests PRIVATE cxx_std_23)
+    target_compile_definitions(SettingsMenu${policy}Tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_options(SettingsMenu${policy}Tests PRIVATE /UNDEBUG /utf-8)
     add_test(NAME SettingsMenu.${policy} COMMAND SettingsMenu${policy}Tests)
   endforeach()
-  foreach(store IniSettingsStoreControl PreviewIsolation)
-    settings_menu_test(SettingsMenu${store}Tests "${SETTINGS_MENU_TEST_DIR}/${store}Tests.cpp" ${SETTINGS_MENU_STORE_SOURCES})
-    add_test(NAME SettingsMenu.${store} COMMAND SettingsMenu${store}Tests)
-  endforeach()
-  target_compile_definitions(SettingsMenuPreviewIsolationTests PRIVATE RPSUI_SETTINGS_MENU_PREVIEW)
-  settings_menu_test(SettingsMenuHelpTests "${SETTINGS_MENU_TEST_DIR}/SettingHelpTests.cpp")
-  add_test(NAME SettingsMenu.Help COMMAND SettingsMenuHelpTests)
 
   find_program(PWSH_EXECUTABLE NAMES pwsh REQUIRED)
   add_test(NAME RPSUIFramework.SourceContracts

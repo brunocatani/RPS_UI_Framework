@@ -1,6 +1,6 @@
 # RPS UI Framework
 
-Shared world-space UI and VR controller interaction for Fallout 4 VR. It hosts world panels and draws them with Dear ImGui, owns world overlay drawing (gameplay indicators and debug shapes, drawn over the lit scene; it does not paint scene surfaces) and publishes controller input. It owns one menu, the settings menu: every RPS mod's settings pages, the Spawner and the Console, opened from its holotape or by a mod such as RobCo PALM.
+Shared world-space UI and VR controller interaction for Fallout 4 VR. It hosts world panels and draws them with Dear ImGui, owns world overlay drawing (gameplay indicators and debug shapes, drawn over the lit scene; it does not paint scene surfaces) and publishes controller input. It owns one menu, the settings menu: the Spawner, the Console and the pages other mods add through the SettingsMenu interface, opened from its holotape or by a mod such as RobCo PALM.
 
 ## Layout
 
@@ -8,10 +8,10 @@ Shared world-space UI and VR controller interaction for Fallout 4 VR. It hosts w
 - `support/RPS_UI_Framework/`: code shared by the host and consumers' desktop previews and tests, kept out of `include/` because it is not runtime API. `ImGuiPanelHost.h` runs a panel's Dear ImGui frame, `ThemeStyle.h` turns a theme into ImGui's style (both include Dear ImGui), `ThemeDefaults.h` holds the built-in themes (Pip-Boy, the default, New Vegas and Vault-Tec; standard library only), and `ThemeStyle.h` also has `pushChosen`, the shared look of a chosen choice, and `BindingText.h` (standard library only) and `BindingIcons.h` show controller bindings as sentences and icons.
 - `docs/api/`: one page per interface, starting at `Overview.md`. `docs/api/Migration.md` updates a mod built against RPS UI Framework 1.1 (the RPS SDK's `RPSUI*Api.h` headers); ROCK's `skills/rock-1.0-migration/SKILL.md` covers it with ROCK, PAPER and RobCo PALM. `docs/Themes.md` is the players' and theme makers' guide.
 - `src/`: the plugin. `Api.cpp` holds the tables, discovery and retired exports. `FrameworkRuntime.cpp` hosts panels, `render/PanelImGui.cpp` owns their Dear ImGui contexts and `InputService.cpp` publishes input. `UiSettings.cpp` reads `RPS_UI.toml` and `ThemeStore.cpp` the theme files, on a watcher thread that publishes immutable snapshots. `WorldDrawStore.cpp` owns world drawing.
-- `src/settings_menu/`: the settings menu, built into a game library and a desktop-preview library. `ConfiguratorRuntime.cpp` is its state and layout, `IniSettingsStore.cpp` reads each mod's settings (SCISSORS' and DIAMOND's through their Configuration APIs, others from their files), `SettingHelp.h` reads the help convention that gives a page its choices, `ExternalPages.cpp` holds mods' pages. `src/SettingsMenuHost.cpp` ties it to the plugin's lifecycle and `src/SettingsHolotape.cpp` to the holotape.
+- `src/settings_menu/`: the settings menu, built into a game library and a desktop-preview library. `ConfiguratorRuntime.cpp` is its state and layout, `SpawnBrowser.cpp` the Spawner, `ConsoleTab.cpp` and `ConsoleService.cpp` the Console, `ExternalPages.cpp` holds mods' pages. `src/SettingsMenuHost.cpp` ties it to the plugin's lifecycle and `src/SettingsHolotape.cpp` to the holotape.
 - `data/plugin-source/`: the Spriggit source of `RPS_UI_Framework.esp` (the settings holotape); `data/mod/` holds the built plugin that ships. Edit the YAML and rebuild the plugin with Spriggit's `deserialize`.
-- `preview/`: `RPSUISettingsPreview.exe`, the settings menu on the desktop over a sandbox seeded from PAPER's example settings; `--capture <folder>` saves its main pages as PNG.
-- `tests/`: targeted tests. `ConsumerExample.cpp` is the minimal consumer, compiled with the public header test. `tests/settings_menu/` covers the menu's stores and policies against stub provider DLLs.
+- `preview/`: `RPSUISettingsPreview.exe`, the settings menu's Spawner (with sample items) and Console on the desktop; `--capture <folder>` saves both as PNG.
+- `tests/`: targeted tests. `ConsumerExample.cpp` is the minimal consumer, compiled with the public header test. `tests/settings_menu/` covers the menu's pure policies.
 
 ## Build and tests
 
@@ -26,16 +26,11 @@ The plugin is `F4SE/Plugins/RPS_UI_Framework.dll` and `RPS_UI_Framework.esp` at 
 
 ## What it does not own
 
-Each mod owns its settings and their files; the settings menu only shows and edits them. ROCK's settings are not in this menu: ROCK ships its own page for Mods Config FO4 VR. Other menus belong to the mods that show them. RobCo PALM owns the wheel and persists the shared pointer aim. Consumers own their panel contents (their ImGui calls, fonts, styles and textures) and keep their callback data alive until a safe unregister returns `Ok`.
+Each mod owns its settings, their files and its own page in Mods Config FO4 VR; the settings menu edits no mod's settings. Other menus belong to the mods that show them. RobCo PALM owns the wheel and persists the shared pointer aim. Consumers own their panel contents (their ImGui calls, fonts, styles and textures) and keep their callback data alive until a safe unregister returns `Ok`.
 
 ## Settings menu
 
-- Runtime availability comes from the loaded modules (`src/settings_menu/RpsMod.h`). The menu never changes a provider's published contract.
-- PAPER's page edits `PAPER.toml` line by line through the file editor (`src/settings_menu/IniSettingsStore.cpp`), which reads TOML files as RPS Framework's settings store writes them (`## === ` category headings, `##` help, single-`#` player notes, quoted strings) and INI files; PAPER's watcher applies the edit.
-- SCISSORS pages (consumer and developer) bind only `SCISSORS.dll`'s `SCISSORS_GetConfiguration` 2.0 table, from SCISSORS' own `include/` (`SCISSORS_INCLUDE_DIR`). Never forward NPC settings through ROCK or write SCISSORS' settings files directly. `PhysicalMelee` lives on the SCISSORS page and goes through SCISSORS Configuration, never ROCK configuration.
-- The RPS UI page edits `RPS_UI.toml` through the same file editor; its Theme dropdown lists the files in the `Themes` folder beside it.
-- Preview builds never discover or write a real provider, and injected fixtures stay read-only.
-
+- Its tabs are the Spawner, the Console, then the pages mods add (`src/settings_menu/ExternalPages.cpp`). It opens the first time on its home tab, the first page a mod added (RobCo PALM's Wheel items) or else the Spawner, and afterwards on the tab it was closed on. Back on another tab goes home; Back on the home tab closes the menu.
 - The Console hooks the call to `ConsoleLog::AddString` at plugin load (`src/settings_menu/ConsoleService.cpp`), after checking the live bytes, and runs commands through `Console::ExecuteCommand`, so the native Console menu is never needed. Commands containing `%` are refused: the engine echoes a command through its print function as the format string.
 - The on-screen keyboard is its own panel (`rpsui.settings.keyboard`, `src/settings_menu/OnScreenKeyboard.cpp`) under the menu. It is up on the Console tab, and on the Spawner while one of its searches is open. Both keyboards feed a `ConsoleLine`, not an ImGui text field, because clicking a key would take focus from that field. The real keyboard is captured only while the keyboard panel is up.
 - Console shortcut buttons come from `ConsoleCommands.ini` (`src/settings_menu/ConsoleShortcuts.h` parses it), read only on entering the Console tab and on Reload, never per frame.
@@ -52,6 +47,5 @@ Each mod owns its settings and their files; the settings menu only shows and edi
 - The settings holotape opens the menu through `TESEquipEvent`, registered through FO4VR's equip-sink function at RVA 0x41E090 after a live byte check; a mismatch leaves the holotape inert and logged.
 - `RPS_UI_Framework.esp` is ESL-flagged. The holotape's runtime ID is built from the plugin file's own compile indices, never CommonLib's `LookupForm`, which cannot see light plugins on FO4VR's light-plugin loaders.
 - Players see the settings menu, its header and its holotape as the ROCK Family Configurator. The holotape is given and works whether or not RobCo PALM is loaded.
-- The desktop preview never writes a mod's settings: only the stores of its own sandbox save.
 - Screen-positioned drawing does not exist. World drawing is anchored to world points, and text is projected per eye.
 - The host owns every panel's Dear ImGui context, renderer, input feeding, frame, texture resolution and theme; a consumer never receives a render target or device context, and declares only its layout size. A consumer's Dear ImGui build must match the host's (`ImGuiBuild.h`), or its panel is refused and the refusal is logged.

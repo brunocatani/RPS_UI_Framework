@@ -1,6 +1,4 @@
 #pragma once
-#include <filesystem>
-#include <array>
 #include <cstdint>
 #include <span>
 #include <string_view>
@@ -8,7 +6,6 @@
 #include "render/NativeRenderer.h"
 namespace rpsui::settings_menu {
 void onGameDataReady();
-void onGameSessionReady();
 void shutdown();
 bool isOpen() noexcept;
 bool isOpening() noexcept;
@@ -30,17 +27,12 @@ struct ConsoleKeyEvent { bool character{ false }; std::uint32_t code{ 0 }; };
 // physical keyboard's input to the line it types into, and runs the console's queued commands.
 void serviceConsole(bool keyboardHeld, bool windowFocused, std::span<const ConsoleKeyEvent> keys);
 #ifdef RPSUI_SETTINGS_MENU_PREVIEW
+// The desktop preview: input is ready and the Spawner holds its sample items.
+void initializePreview();
 void setPreviewOpen(bool open);
-[[nodiscard]] float previewTabCenterX(unsigned index, float width);
 void drainPreviewActions();
-// The desktop preview's settings folder: PAPER.toml and RPS_UI.toml as the files there are,
-// read and written like the game's.
-void initializeFilePreview(const std::filesystem::path& folder);
-// Shows a mod's page at the first category whose title contains "category", or a tab.
-void previewShow(std::string_view mod, std::string_view category);
+// Shows the "Spawner" or the "Console" tab.
 void previewShowTab(std::string_view tab);
-// Opens every Fine-tuning fold, for captures.
-void previewOpenFineTuning(bool open);
 // Typed keys for the Console and the Spawner's searches.
 void previewKeys(std::span<const ConsoleKeyEvent> keys);
 #endif

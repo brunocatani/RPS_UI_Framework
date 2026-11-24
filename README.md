@@ -2,7 +2,7 @@
 
 Shared world-space UI and VR controller interaction for Fallout 4 VR mods.
 
-RPS UI Framework powers RobCo PALM and the settings menu of every RPS mod. Install
+RPS UI Framework powers RobCo PALM and the world panels of other RPS mods. Install
 it when a mod lists it as a requirement.
 
 It works alongside [Mods Config FO4 VR](https://github.com/ArthurHub/F4VR-Mods-Config):
@@ -11,19 +11,18 @@ input until it closes.
 
 ## ROCK Family Configurator
 
-The settings menu of every RPS mod. Play the **ROCK Family Configurator** holotape in
-your Pip-Boy (enable `RPS_UI_Framework.esp`; you get the holotape whenever a game starts
-or loads without one, with or without RobCo PALM). When you close the Pip-Boy, the menu
-opens in front of you with:
+Play the **ROCK Family Configurator** holotape in your Pip-Boy (enable
+`RPS_UI_Framework.esp`; you get the holotape whenever a game starts or loads without
+one, with or without RobCo PALM). When you close the Pip-Boy, the menu opens in front
+of you with:
 
-- **Settings** for PAPER and the other RPS mods you have loaded. Each page starts
-  with the main choices, named and explained in one line; numbers are under
-  **Fine-tuning**. ROCK's settings are on ROCK's page in Mods Config FO4 VR.
 - **Spawner**: add any item from your load order to your inventory.
 - **Console**: run console commands with the on-screen keyboard or a real one. Its
   shortcut buttons are in `Mods_Config\RPS_UI_Framework\ConsoleCommands.ini`.
+- The pages other mods add, such as RobCo PALM's **Wheel items** and **Wheel settings**.
 
-RobCo PALM's Config opens the same menu from the wheel.
+RobCo PALM's Config opens the same menu from the wheel, on its wheel pages. Every
+mod's settings are on that mod's own page in Mods Config FO4 VR.
 
 ## Settings and themes
 

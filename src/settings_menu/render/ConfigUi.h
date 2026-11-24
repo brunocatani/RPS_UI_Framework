@@ -13,12 +13,10 @@ namespace devui::visual {
 inline float railWidth(float width) { return std::clamp(width * 0.17f, 280.0f, 320.0f); }
 struct ReadableLabel {
     std::array<char, 192> text{};
-    explicit ReadableLabel(std::string_view key, bool stripTypePrefix = false) {
+    explicit ReadableLabel(std::string_view key) {
         std::size_t out = 0;
-        const std::size_t begin = stripTypePrefix && key.size() > 1 &&
-            (key[0] == 'b' || key[0] == 'f' || key[0] == 'i' || key[0] == 's') && std::isupper(static_cast<unsigned char>(key[1])) ? 1 : 0;
-        for (std::size_t i = begin; i < key.size() && out + 2 < text.size(); ++i) {
-            if (i > begin && std::isupper(static_cast<unsigned char>(key[i])) &&
+        for (std::size_t i = 0; i < key.size() && out + 2 < text.size(); ++i) {
+            if (i > 0 && std::isupper(static_cast<unsigned char>(key[i])) &&
                 (std::islower(static_cast<unsigned char>(key[i-1])) ||
                 (std::isupper(static_cast<unsigned char>(key[i-1])) && i+1 < key.size() && std::islower(static_cast<unsigned char>(key[i+1]))))) text[out++] = ' ';
             text[out++] = key[i] == '_' ? ' ' : key[i];
@@ -55,7 +53,6 @@ inline bool button(const char* label,ImVec2 size={},bool selected=false) {
         ImGui::GetColorU32(selected || ImGui::IsItemHovered()?accent():text()),label,end);
     draw->PopClipRect();return clicked;
 }
-inline bool checkbox(const char* label,bool* value) { return ImGui::Checkbox(label,value); }
 class Font {
 public:
     Font(render::FontRole role, float size) { ImGui::PushFont(render::GetFont(role) ? render::GetFont(role) : ImGui::GetFont(), size); }

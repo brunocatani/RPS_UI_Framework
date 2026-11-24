@@ -1,6 +1,6 @@
 # Themes
 
-Every world panel drawn through RPS UI Framework (RobCo PALM's wheel and Config, dialogue, the backpack, and any other mod's panels) takes its colours, fonts and sizes from one theme. Change the theme and every panel follows, while the game runs.
+Every world panel drawn through RPS UI Framework (RobCo PALM's wheel, the ROCK Family Configurator, dialogue, the backpack, and any other mod's panels) takes its colours, fonts and sizes from one theme. Change the theme and every panel follows, while the game runs.
 
 ## Choosing a theme
 
@@ -19,7 +19,7 @@ Three themes are built in, in the colours of Fallout's own screens, with rounded
 | `New Vegas` | Fallout: New Vegas's HUD amber, `#FFB642`, on dark brown |
 | `Vault-Tec` | Vault-Tec yellow on navy, with white text |
 
-RPS UI writes each into `Themes` and puts back any key a file lacks. RobCo PALM's Config (RPS UI page, Theme) switches between them and any theme you add.
+RPS UI writes each into `Themes` and puts back any key a file lacks. Set `Theme` to switch between them and any theme you add.
 
 ## Making a theme
 

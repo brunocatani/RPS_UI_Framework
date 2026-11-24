@@ -1,12 +1,8 @@
 /*
  * RPSUISettingsPreview.exe: RPS UI's settings menu on the desktop, without the game. The
  * menu's own panel callbacks run in a LocalPanelHost with RPS UI's default theme, exactly
- * as RPS UI runs them in the headset.
- *
- * Settings live in "Settings sandbox" beside the exe, filled from the mods' example files
- * the first time and again whenever a mod's example changes. --settings <folder> copies that folder's files over the sandbox's first (a
- * Mods_Config folder works: each mod's file is looked up in its own subfolder); the folder
- * itself is only read. The preview reads and writes the sandbox as the game does its files.
+ * as RPS UI runs them in the headset. It shows the Spawner, with sample items, and the
+ * Console, which echoes its commands; neither changes a game.
  *
  * Mouse: the pointer and trigger. Right click: Back (a grip tap). Wheel: the stick's scroll.
  * Keyboard: typing for the Console and the Spawner's searches.
@@ -69,13 +65,6 @@ namespace
         if (FAILED(result)) throw std::runtime_error(std::string(what) + " failed");
     }
 
-    [[nodiscard]] fs::path exeFolder()
-    {
-        std::array<wchar_t, 32768> path{};
-        GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
-        return fs::path(path.data()).parent_path();
-    }
-
     [[nodiscard]] std::vector<char> readFile(const fs::path& path)
     {
         std::ifstream file(path, std::ios::binary);
@@ -115,40 +104,6 @@ namespace
             return faces;
         }
     };
-
-    // The sandbox, laid out as Mods_Config holds the files. A file from `source` (read only)
-    // replaces the sandbox's; a file still missing comes from the build's "examples". The
-    // preview cannot reorganize a file as its mod does at startup, so when a mod's example
-    // has changed since the sandbox file was filled from it (its layout or options moved),
-    // the sandbox file is filled again; "examples" inside the sandbox keeps what it was
-    // filled from.
-    [[nodiscard]] fs::path prepareSandbox(const fs::path& folder, const fs::path& source = {})
-    {
-        const auto examples = exeFolder() / "examples";
-        const auto filledFrom = folder / "examples";
-        std::error_code error;
-        fs::create_directories(filledFrom, error);
-        for (const auto& [example, mod, file] : { std::array<const char*, 3>{ "PAPER_example.toml", "PAPER", "PAPER.toml" } }) {
-            const auto target = folder / mod / file;
-            const auto current = readFile(examples / example);
-            if (!current.empty() && readFile(filledFrom / example) != current) {
-                fs::remove(target, error);
-                fs::copy_file(examples / example, filledFrom / example, fs::copy_options::overwrite_existing, error);
-            }
-            if (!source.empty()) {
-                for (const auto& from : { source / mod / file, source / file }) {
-                    if (!fs::is_regular_file(from, error)) continue;
-                    fs::create_directories(target.parent_path(), error);
-                    fs::copy_file(from, target, fs::copy_options::overwrite_existing, error);
-                    break;
-                }
-            }
-            if (fs::exists(target, error) || !fs::exists(examples / example, error)) continue;
-            fs::create_directories(target.parent_path(), error);
-            fs::copy_file(examples / example, target, error);
-        }
-        return folder;
-    }
 
     [[nodiscard]] fw::PanelRegistration registration()
     {
@@ -215,19 +170,16 @@ namespace
         g_context->Unmap(staging.Get(), 0);
     }
 
-    // Each main page, from a sandbox of its own inside the output folder.
+    // Each main page.
     int capture(const fs::path& folder, const Faces& faces)
     {
         fs::create_directories(folder);
-        auto sandbox = folder / "sandbox";
-        std::error_code error;
-        fs::remove_all(sandbox, error);
-        menu::initializeFilePreview(prepareSandbox(sandbox));
+        menu::initializePreview();
         menu::setPreviewOpen(true);
         Target target;
         target.create(devui::render::kPanelLayoutWidth, devui::render::kPanelLayoutHeight);
         rpsui::imgui_host::LocalPanelHost host(g_device.Get(), g_context.Get(), registration(), faces.set());
-        const auto settle = [&] {
+        const auto save = [&](const char* name) {
             for (int i = 0; i < 8; ++i) {
                 const float clear[4]{ 0, 0, 0, 0 };
                 g_context->ClearRenderTargetView(target.view.Get(), clear);
@@ -236,36 +188,12 @@ namespace
                 host.frame(target.view.Get(), input);
                 menu::drainPreviewActions();
             }
-        };
-        const auto save = [&](const char* name) {
-            settle();
             writePng(target, folder / name);
         };
-        // A trigger pull at a point of the menu, as a player's pointer makes it: hover, press, release.
-        const auto click = [&](float x, float y) {
-            for (const bool down : { false, true, false }) {
-                rpsui::imgui_host::PanelInput input{};
-                input.pointerValid = true;
-                input.pointerX = x;
-                input.pointerY = y;
-                input.primaryDown = down;
-                host.frame(target.view.Get(), input);
-                menu::drainPreviewActions();
-            }
-        };
-        menu::previewShow("PAPER", "Bolt");
-        save("01-paper-bolt-appreciation.png");
-        click(570.0f, 370.0f); // Bolt Appreciation: On
-        save("01b-paper-bolt-appreciation-on-picked.png");
-        menu::previewShow("PAPER", "Reload");
-        save("02-paper-reload.png");
-        menu::previewOpenFineTuning(true);
-        save("02b-paper-reload-fine-tuning.png");
-        menu::previewOpenFineTuning(false);
         menu::previewShowTab("Spawner");
-        save("03-spawner.png");
+        save("01-spawner.png");
         menu::previewShowTab("Console");
-        save("04-console.png");
+        save("02-console.png");
         return 0;
     }
 
@@ -312,9 +240,9 @@ namespace
         return {};
     }
 
-    int run(HINSTANCE instance, const fs::path& settings, const Faces& faces)
+    int run(HINSTANCE instance, const Faces& faces)
     {
-        menu::initializeFilePreview(settings);
+        menu::initializePreview();
         menu::setPreviewOpen(true);
 
         WNDCLASSEXW windowClass{ sizeof(windowClass), CS_CLASSDC, windowProc, 0, 0, instance };
@@ -323,8 +251,7 @@ namespace
         RegisterClassExW(&windowClass);
         RECT frame{ 0, 0, static_cast<LONG>(devui::render::kPanelLayoutWidth), static_cast<LONG>(devui::render::kPanelLayoutHeight) };
         AdjustWindowRect(&frame, WS_OVERLAPPEDWINDOW, FALSE);
-        const auto title = L"RPS UI settings menu preview - " + settings.wstring();
-        HWND hwnd = CreateWindowW(windowClass.lpszClassName, title.c_str(), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+        HWND hwnd = CreateWindowW(windowClass.lpszClassName, L"RPS UI settings menu preview", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
             frame.right - frame.left, frame.bottom - frame.top, nullptr, nullptr, instance, nullptr);
 
         DXGI_SWAP_CHAIN_DESC desc{};
@@ -424,9 +351,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
                 &g_context), "Direct3D 11 WARP device");
             return capture(fs::absolute(folder), faces);
         }
-        const auto given = argument(argc, argv, L"--settings");
-        const auto settings = prepareSandbox(exeFolder() / "Settings sandbox", given.empty() ? fs::path{} : fs::path(given));
-        return run(instance, settings, faces);
+        return run(instance, faces);
     } catch (const std::exception& error) {
         MessageBoxA(nullptr, error.what(), "RPS UI settings menu preview", MB_ICONERROR);
         return 1;
