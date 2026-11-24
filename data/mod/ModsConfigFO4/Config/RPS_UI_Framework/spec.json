@@ -1,0 +1,70 @@
+{
+  "minSchemaVersion": 1,
+  "modName": "RPS_UI_Framework",
+  "displayName": "RPS UI Framework",
+  "help": "How every mod's world panels look and respond: theme, sharpness, controller ticks and moving panels.",
+  "category": "Interface",
+  "specVersion": 1,
+  "f4sePluginRequirements": ["RPS_UI_Framework"],
+  "files": {
+    "config": { "format": "toml", "root": "myGames", "path": "Mods_Config/RPS_UI_Framework/RPS_UI.toml" }
+  },
+  "defaultFile": "config",
+  "applies": "live",
+  "content": [
+    {
+      "type": "text",
+      "text": "These settings apply to the world panels of every mod built on RPS UI Framework: RobCo PALM's wheel, the ROCK Family Configurator and the panels other mods show. A change shows on the panels at once; Save keeps it."
+    },
+    {
+      "type": "section",
+      "text": "Display",
+      "content": [
+        {
+          "type": "dropdown",
+          "valueType": "string",
+          "id": "theme",
+          "text": "Theme",
+          "help": "The colors, fonts and sizes every panel draws with: a file in the Themes folder beside RPS_UI.toml. Built in: Pip-Boy (the game's green), New Vegas (amber) and Vault-Tec (blue and yellow). Copy one of their files under a new name to make your own.",
+          "default": "Pip-Boy",
+          "valueOptions": { "listFromClientCallback": true },
+          "storage": { "path": ["Display", "Theme"] }
+        },
+        {
+          "type": "slider",
+          "valueType": "float",
+          "text": "Sharpness",
+          "help": "Texture pixels for each unit of a panel's layout, at the panel's default size. Higher is sharper text and uses more video memory. A panel shown larger gets more pixels, so it stays as sharp.",
+          "default": 1.5,
+          "valueOptions": { "min": 1.0, "max": 3.0, "step": 0.1 },
+          "storage": { "path": ["Display", "Sharpness"] }
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": "Controls",
+      "content": [
+        {
+          "type": "slider",
+          "valueType": "float",
+          "text": "Haptic Strength",
+          "help": "How strongly the controller ticks when you press something on a panel, and every other pulse a mod's panel asks for. 0 turns them off, 1 is the strongest.",
+          "default": 0.6,
+          "valueOptions": { "min": 0.0, "max": 1.0, "step": 0.05 },
+          "storage": { "path": ["Controls", "HapticStrength"] }
+        },
+        {
+          "type": "slider",
+          "valueType": "float",
+          "text": "Grip Hold to Move a Panel",
+          "help": "How long to hold grip on a panel that can be moved before it follows your hand; release grip to place it. A shorter grip press is Back.",
+          "default": 0.45,
+          "valueOptions": { "min": 0.2, "max": 1.5, "step": 0.05 },
+          "display": { "unit": "s" },
+          "storage": { "path": ["Controls", "GripMoveSeconds"] }
+        }
+      ]
+    }
+  ]
+}

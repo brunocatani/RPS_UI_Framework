@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- **RPS UI Framework's own page in Mods Config FO4 VR.** Theme, Sharpness, Haptic
+  Strength and the grip hold that moves a panel are set there. A change shows on the
+  panels as you make it; Save keeps it, and Discard or closing the menu puts the saved
+  values back. Theme lists the theme files in your `Themes` folder. `RPS_UI.toml`
+  still works as before, and without Mods Config FO4 VR nothing changes.
+
 ### Changed
 
 - **ROCK's settings pages are gone from the ROCK Family Configurator.** ROCK 1.0.4

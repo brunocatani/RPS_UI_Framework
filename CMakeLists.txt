@@ -181,8 +181,8 @@ if(POST_BUILD_COPY_PLUGIN)
       COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "$<TARGET_PDB_FILE:${PROJECT_NAME}>"
         "${copy_path}/F4SE/Plugins/"
-      # data/mod: the game data the player installs (the settings holotape's plugin). Its
-      # source is data/plugin-source, a Spriggit project.
+      # data/mod: the game data the player installs: the settings holotape's plugin, whose
+      # source is data/plugin-source (a Spriggit project), and the Mods Config FO4 VR page.
       COMMAND ${CMAKE_COMMAND} -E copy_directory "${ROOT_DIR}/data/mod" "${copy_path}"
       COMMENT "Deploying RPS UI Framework to ${copy_path}")
   endforeach()

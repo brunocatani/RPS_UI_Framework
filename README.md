@@ -26,10 +26,12 @@ mod's settings are on that mod's own page in Mods Config FO4 VR.
 
 ## Settings and themes
 
-`Documents\My Games\Fallout4VR\Mods_Config\RPS_UI_Framework\RPS_UI.toml` holds the
-panels' sharpness, the theme every mod's panels draw with, how strongly the controller
-ticks when you press something on a panel, and how long to hold grip on a panel before
-it moves with your hand. Themes are files you can copy, edit and share; see
+RPS UI Framework's page in Mods Config FO4 VR sets the theme every mod's panels draw
+with, the panels' sharpness, how strongly the controller ticks when you press something
+on a panel, and how long to hold grip on a panel before it moves with your hand. A
+change shows on the panels as you make it; Save keeps it. The page edits
+`Documents\My Games\Fallout4VR\Mods_Config\RPS_UI_Framework\RPS_UI.toml`, which you can
+also edit by hand. Themes are files you can copy, edit and share; see
 [Themes](docs/Themes.md).
 
 On panels that allow it, hold grip on the panel to carry it, push or pull it with the

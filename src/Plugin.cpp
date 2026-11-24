@@ -4,6 +4,7 @@
 #include "InputService.h"
 #include "KeyboardCapture.h"
 #include "Logger.h"
+#include "ModsConfigClient.h"
 #include "SettingsMenuHost.h"
 #include "UiSettings.h"
 #include "render/PanelImGui.h"
@@ -114,6 +115,7 @@ namespace
         // Read here: panel contexts are built on the render thread, which
         // never does file I/O.
         rpsui::settings::start();
+        rpsui::mods_config_client::connect();
         auto& runtime = rpsui::FrameworkRuntime::get();
         if (!rpsui::render::SceneDepthCapture::Install()) {
             runtime.setHookStatus(rpsui::api::cooperation::HookStatus::Unavailable);

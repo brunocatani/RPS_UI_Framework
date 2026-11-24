@@ -8,6 +8,9 @@
 
 #include <ShlObj.h>
 
+#include <condition_variable>
+#include <map>
+
 namespace rpsui::settings
 {
     namespace
@@ -16,6 +19,19 @@ namespace rpsui::settings
 
         constexpr std::string_view kDisplay = "Display";
         constexpr std::string_view kControls = "Controls";
+
+        struct OptionPath
+        {
+            std::string_view table;
+            std::string_view key;
+        };
+        // Every option of RPS_UI.toml, the only ones a preview may set.
+        constexpr std::array kOptions{
+            OptionPath{ kDisplay, "Theme" },
+            OptionPath{ kDisplay, "Sharpness" },
+            OptionPath{ kControls, "HapticStrength" },
+            OptionPath{ kControls, "GripMoveSeconds" },
+        };
 
         std::vector<RPS::Settings::Definition> definitions()
         {
@@ -42,16 +58,27 @@ namespace rpsui::settings
             };
         }
 
+        // Preview values by "table.key", as RPS::Settings::settingPath names them.
+        using Previews = std::map<std::string, std::string, std::less<>>;
+
         struct State
         {
             std::atomic<std::shared_ptr<const Snapshot>> current{ std::make_shared<const Snapshot>() };
-            // Load thread once, then only the watcher.
+            // Written once by start() on the load thread, read-only afterwards.
             std::filesystem::path directory;
+            // Load thread once, then only the watcher.
             std::unique_ptr<RPS::Settings::Store> store;
             std::string themeName;
             std::filesystem::path themeFile;
             std::uint64_t themeRevision{ 0 };
             std::jthread watcher;
+            // Guarded by requestMutex: written on the game thread, taken by the watcher,
+            // which wake rouses.
+            std::mutex requestMutex;
+            std::condition_variable_any wake;
+            Previews previews;
+            bool previewsChanged{ false };
+            bool readFileNow{ false };
         };
 
         [[nodiscard]] State& state() noexcept
@@ -68,14 +95,29 @@ namespace rpsui::settings
             return std::filesystem::path(documents) / L"My Games" / L"Fallout4VR" / L"Mods_Config" / L"RPS_UI_Framework";
         }
 
-        [[nodiscard]] float floatValue(const RPS::Settings::Store& store, std::string_view table, std::string_view key,
-            float fallback, float minimum, float maximum)
+        [[nodiscard]] bool knownOption(std::string_view table, std::string_view key) noexcept
         {
+            return std::ranges::any_of(kOptions, [&](const OptionPath& option) { return option.table == table && option.key == key; });
+        }
+
+        // An option's text: its preview, else the file's value; null when neither has one.
+        [[nodiscard]] const std::string* valueText(const RPS::Settings::Store& store, const Previews& previews,
+            std::string_view table, std::string_view key)
+        {
+            if (const auto preview = previews.find(RPS::Settings::settingPath(table, key)); preview != previews.end())
+                return &preview->second;
             const auto* setting = store.find(table, key);
-            if (!setting) return fallback;
+            return setting ? &setting->value : nullptr;
+        }
+
+        [[nodiscard]] float floatValue(const RPS::Settings::Store& store, const Previews& previews, std::string_view table,
+            std::string_view key, float fallback, float minimum, float maximum)
+        {
+            const auto* text = valueText(store, previews, table, key);
+            if (!text) return fallback;
             float value = fallback;
             try {
-                value = std::stof(setting->value);
+                value = std::stof(*text);
             } catch (...) {
                 return fallback;
             }
@@ -85,22 +127,26 @@ namespace rpsui::settings
             return clamped;
         }
 
-        // Reads RPS_UI.toml, and the theme when its name changed or reloadTheme
-        // is set, into a new snapshot. Throws on a store failure.
-        void load(bool startup, bool reloadTheme)
+        // Publishes a new snapshot of the store's last values with the previews over them,
+        // reading the theme when its name changed or reloadTheme is set. Watcher (or load
+        // thread at start) only.
+        void publish(std::string_view reason, bool reloadTheme)
         {
             auto& value = state();
-            value.store->load(startup);
-            for (const auto& notice : value.store->notices()) log::info("{}", notice);
-            for (const auto& message : value.store->messages()) log::warn("{}", message);
+            Previews previews;
+            {
+                std::scoped_lock lock(value.requestMutex);
+                previews = value.previews;
+            }
+            const auto& store = *value.store;
             const auto previous = value.current.load(std::memory_order_acquire);
             auto next = std::make_shared<Snapshot>();
-            next->sharpness = floatValue(*value.store, kDisplay, "Sharpness", next->sharpness, kMinimumSharpness, kMaximumSharpness);
-            next->hapticStrength = floatValue(*value.store, kControls, "HapticStrength", next->hapticStrength, 0.0f, 1.0f);
-            next->gripMoveSeconds = floatValue(*value.store, kControls, "GripMoveSeconds", next->gripMoveSeconds,
+            next->sharpness = floatValue(store, previews, kDisplay, "Sharpness", next->sharpness, kMinimumSharpness, kMaximumSharpness);
+            next->hapticStrength = floatValue(store, previews, kControls, "HapticStrength", next->hapticStrength, 0.0f, 1.0f);
+            next->gripMoveSeconds = floatValue(store, previews, kControls, "GripMoveSeconds", next->gripMoveSeconds,
                 kMinimumGripMoveSeconds, kMaximumGripMoveSeconds);
-            const auto* themeSetting = value.store->find(kDisplay, "Theme");
-            const std::string themeName = themeSetting ? themeSetting->value : std::string(theme_defaults::kName);
+            const auto* themeText = valueText(store, previews, kDisplay, "Theme");
+            const std::string themeName = themeText ? *themeText : std::string(theme_defaults::kName);
             if (reloadTheme || !previous->theme || themeName != value.themeName) {
                 next->theme = theme_store::load(value.directory, themeName, ++value.themeRevision);
                 value.themeName = themeName;
@@ -108,13 +154,24 @@ namespace rpsui::settings
             } else {
                 next->theme = previous->theme;
             }
-            next->revision = value.store->revision();
-            log::info("RPS UI settings {}: theme '{}', sharpness {:.2f}, haptic strength {:.2f}, grip move {:.2f} s",
-                startup ? "loaded" : "reloaded", next->theme->theme.name, next->sharpness, next->hapticStrength, next->gripMoveSeconds);
+            next->revision = store.revision();
+            log::info("RPS UI settings {}: theme '{}', sharpness {:.2f}, haptic strength {:.2f}, grip move {:.2f} s, previews {}",
+                reason, next->theme->theme.name, next->sharpness, next->hapticStrength, next->gripMoveSeconds, previews.size());
             value.current.store(std::move(next), std::memory_order_release);
         }
 
-        // Polls both files: RPS_UI.toml and the theme it names.
+        // Reads RPS_UI.toml, then publishes. Throws on a store failure.
+        void load(bool startup, bool reloadTheme)
+        {
+            auto& value = state();
+            value.store->load(startup);
+            for (const auto& notice : value.store->notices()) log::info("{}", notice);
+            for (const auto& message : value.store->messages()) log::warn("{}", message);
+            publish(startup ? "loaded" : "reloaded", reloadTheme);
+        }
+
+        // Polls both files, RPS_UI.toml and the theme it names, and wakes at once for a
+        // preview or a Save.
         void watch(std::stop_token stop, std::filesystem::path settingsFile)
         {
             auto& value = state();
@@ -123,19 +180,33 @@ namespace rpsui::settings
             auto themeFile = value.themeFile;
             auto themeWritten = std::filesystem::last_write_time(themeFile, error);
             while (!stop.stop_requested()) {
-                std::this_thread::sleep_for(250ms);
+                bool previewsChanged = false;
+                bool readFileNow = false;
+                {
+                    std::unique_lock lock(value.requestMutex);
+                    (void)value.wake.wait_for(lock, stop, 250ms, [&] { return value.previewsChanged || value.readFileNow; });
+                    previewsChanged = std::exchange(value.previewsChanged, false);
+                    readFileNow = std::exchange(value.readFileNow, false);
+                }
+                if (stop.stop_requested()) break;
                 error.clear();
                 const auto settingsNow = std::filesystem::last_write_time(settingsFile, error);
                 const bool settingsChanged = !error && settingsNow != settingsWritten;
                 error.clear();
                 const auto themeNow = std::filesystem::last_write_time(themeFile, error);
                 const bool themeChanged = !error && themeNow != themeWritten;
-                if (!settingsChanged && !themeChanged) continue;
-                // Let the writer finish before reading.
-                std::this_thread::sleep_for(250ms);
-                if (stop.stop_requested()) break;
+                const bool readFiles = readFileNow || settingsChanged || themeChanged;
+                if (!readFiles && !previewsChanged) continue;
+                // An editor's write: let it finish before reading. A Save has finished writing.
+                if (readFiles && !readFileNow) {
+                    std::this_thread::sleep_for(250ms);
+                    if (stop.stop_requested()) break;
+                }
                 try {
-                    load(false, themeChanged);
+                    if (readFiles)
+                        load(false, themeChanged);
+                    else
+                        publish("previewed", false);
                 } catch (const std::exception& failure) {
                     log::warn("RPS UI settings could not be reread: {}; the last values stay", failure.what());
                 }
@@ -166,8 +237,8 @@ namespace rpsui::settings
                 .playerFileName = "RPS_UI.toml",
                 .playerHeader =
                     "## RPS_UI.toml - RPS UI Framework options\n"
-                    "## Every mod's world panels follow them. Change them in the RobCo PALM wheel menu, or edit this\n"
-                    "## file. Changes apply while the game runs.\n"
+                    "## Every mod's world panels follow them. Change them on RPS UI Framework's page in Mods Config\n"
+                    "## FO4 VR, or edit this file. Changes apply while the game runs.\n"
                     "## Each option has its help above it. Your own notes are kept when they start with a single #.\n",
             }, definitions());
             load(true, true);
@@ -186,5 +257,85 @@ namespace rpsui::settings
     std::shared_ptr<const Snapshot> current() noexcept
     {
         return state().current.load(std::memory_order_acquire);
+    }
+
+    void setPreview(std::string_view table, std::string_view key, std::string text) noexcept
+    {
+        if (!knownOption(table, key)) {
+            log::warn("RPS UI preview of [{}] {} ignored: RPS_UI.toml has no such option", table, key);
+            return;
+        }
+        auto& value = state();
+        try {
+            std::scoped_lock lock(value.requestMutex);
+            auto& entry = value.previews[RPS::Settings::settingPath(table, key)];
+            if (entry == text) return;
+            entry = std::move(text);
+            value.previewsChanged = true;
+        } catch (...) {
+            log::warn("RPS UI preview of [{}] {} could not be kept", table, key);
+            return;
+        }
+        value.wake.notify_one();
+    }
+
+    void discardPreview(std::string_view table, std::string_view key) noexcept
+    {
+        auto& value = state();
+        try {
+            std::scoped_lock lock(value.requestMutex);
+            const auto found = value.previews.find(RPS::Settings::settingPath(table, key));
+            if (found == value.previews.end()) return;
+            value.previews.erase(found);
+            value.previewsChanged = true;
+        } catch (...) {
+            return;
+        }
+        value.wake.notify_one();
+    }
+
+    void clearPreviews() noexcept
+    {
+        auto& value = state();
+        {
+            std::scoped_lock lock(value.requestMutex);
+            if (value.previews.empty()) return;
+            value.previews.clear();
+            value.previewsChanged = true;
+        }
+        value.wake.notify_one();
+    }
+
+    void endPreviewsAndReload() noexcept
+    {
+        auto& value = state();
+        {
+            std::scoped_lock lock(value.requestMutex);
+            value.previews.clear();
+            value.readFileNow = true;
+        }
+        value.wake.notify_one();
+    }
+
+    std::vector<std::string> themeChoices()
+    {
+        std::vector<std::string> names;
+        const auto& value = state();
+        std::error_code error;
+        const auto folder = value.directory.empty() ? std::filesystem::path() : value.directory / L"Themes";
+        for (const auto& entry : std::filesystem::directory_iterator(folder, error)) {
+            const auto& path = entry.path();
+            if (!entry.is_regular_file(error) || _wcsicmp(path.extension().c_str(), L".toml") != 0) continue;
+            const auto stem = path.stem().u8string();
+            const std::string name(stem.begin(), stem.end());
+            if (theme_store::validName(name)) names.push_back(name);
+        }
+        const auto snapshot = current();
+        if (snapshot->theme) {
+            std::string inUse(snapshot->theme->theme.name);
+            if (std::ranges::find(names, inUse) == names.end()) names.push_back(std::move(inUse));
+        }
+        std::ranges::sort(names, [](const std::string& a, const std::string& b) { return _stricmp(a.c_str(), b.c_str()) < 0; });
+        return names;
     }
 }

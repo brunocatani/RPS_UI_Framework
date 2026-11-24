@@ -19,7 +19,7 @@ Three themes are built in, in the colours of Fallout's own screens, with rounded
 | `New Vegas` | Fallout: New Vegas's HUD amber, `#FFB642`, on dark brown |
 | `Vault-Tec` | Vault-Tec yellow on navy, with white text |
 
-RPS UI writes each into `Themes` and puts back any key a file lacks. Set `Theme` to switch between them and any theme you add.
+RPS UI writes each into `Themes` and puts back any key a file lacks. Theme on RPS UI Framework's page in Mods Config FO4 VR switches between them and any theme you add, and shows the choice on the panels before you save it.
 
 ## Making a theme
 

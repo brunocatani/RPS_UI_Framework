@@ -1,30 +1,20 @@
 #include "PCH.h"
 #include "ModsConfigMenu.h"
 #include "Logger.h"
+#include "ModsConfigFO4Api.h"
 
 #include <Windows.h>
 
 namespace rpsui::mods_config_menu {
 namespace {
-// The leading slots of Mods Config's ModsConfigFO4ApiV1, in its declaration order. That
-// interface only ever appends slots, so a later host keeps these. Only getVersion,
-// getModVersion and getMenuState are called; the other two only hold their slots.
-class HostApiV1 {
-public:
- virtual std::uint32_t getVersion() const = 0;
- virtual const char* getModVersion() const = 0;
- virtual bool addQuickLaunch(void* client, const char* text, const char* help, const char* buttonText, const char* functionName) const = 0;
- virtual bool registerClient(const char* name, std::uint32_t version, void* client) const = 0;
- virtual std::uint32_t getMenuState() const = 0;
-protected:
- ~HostApiV1() = default;
-};
-using GetApi = const HostApiV1*(__cdecl*)();
-constexpr char kDll[] = "ModsConfigFO4VR.dll";
-constexpr char kGetApi[] = "ModsConfigFO4API_GetApiV1";
+// Mods Config's API, bound here without ModsConfigFO4Client::initialize so that a fault in
+// its DLL is caught: only getVersion, getModVersion and getMenuState are called.
+using HostApiV1 = ::mods_config::api::ModsConfigFO4ApiV1;
+using MenuState = ::mods_config::api::MenuState;
+using GetApi = const HostApiV1*(MODS_CONFIG_FO4_CALL*)();
+constexpr auto kDll = ::mods_config::api::MODS_CONFIG_FO4_DLL;
+constexpr auto kGetApi = ::mods_config::api::MODS_CONFIG_FO4_GET_API;
 constexpr std::uint32_t kMinimumApi = 1;
-// MenuState is Closed = 0, Open = 1, Minimized = 2. A minimized menu takes no input.
-constexpr std::uint32_t kMenuOpen = 1;
 
 enum class Binding { Unresolved, Absent, Bound, Failed };
 struct State {
@@ -49,7 +39,7 @@ bool readIdentity(const HostApiV1* api, std::uint32_t& version, char (&modVersio
  }
  __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
-bool readMenuState(const HostApiV1* api, std::uint32_t& menuState) noexcept {
+bool readMenuState(const HostApiV1* api, MenuState& menuState) noexcept {
  __try { menuState = api->getMenuState(); return true; }
  __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
@@ -83,13 +73,14 @@ bool isOpen() noexcept {
  auto& s = state();
  if (s.binding == Binding::Unresolved) bind(s);
  if (s.binding != Binding::Bound) return false;
- std::uint32_t menuState{};
+ MenuState menuState{};
  if (!readMenuState(s.api, menuState)) {
   s.binding = Binding::Failed;
   s.api = nullptr;
   log::error("Mods Config FO4 VR menu-state call faulted; RPS UI input no longer yields to its menu");
   return false;
  }
- return menuState == kMenuOpen;
+ // A minimized menu takes no input.
+ return menuState == MenuState::Open;
 }
 }
