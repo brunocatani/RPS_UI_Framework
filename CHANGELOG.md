@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.0.2
 
 ### Added
 
@@ -9,28 +9,6 @@
   panels as you make it; Save keeps it, and Discard or closing the menu puts the saved
   values back. Theme lists the theme files in your `Themes` folder. `RPS_UI.toml`
   still works as before, and without Mods Config FO4 VR nothing changes.
-
-### Changed
-
-- **ROCK's settings pages are gone.** ROCK 1.0.4
-  moves its settings and setup wizard to its own page in Mods Config FO4 VR. Update
-  RPS UI Framework together with ROCK 1.0.4: 2.0.2 and older still list ROCK pages
-  that no longer work.
-- **The Settings tab is gone.** Every mod's settings are now on that mod's own page in
-  Mods Config FO4 VR. The menu RobCo PALM's Config opens keeps the Spawner, the
-  Console and PALM's Wheel items and Wheel settings. It opens on PALM's wheel pages
-  and after that on the tab you left it on. Its header now reads Config.
-
-### Removed
-
-- **The ROCK Family Configurator holotape and `RPS_UI_Framework.esp`.** The menu
-  opens from RobCo PALM's Config. Your mod manager removes the plugin with this
-  update; a save made with it reports it missing once, which is safe to accept.
-
-## 2.0.2
-
-### Added
-
 - **For mod authors: NumberOverlay 2.1.** A `label` drawn with the numbers in their
   face and color: beside the second row in the chamber column of the HUD styles,
   after the number in `Plain`. ROCK's ammo counters use it for the caliber. Mods
@@ -38,15 +16,18 @@
 
 ### Changed
 
-- The settings menu is now the **ROCK Family Configurator**, and so is its holotape
-  (formerly **RPS UI Settings**). The holotape works with or without RobCo PALM;
-  PALM's Config opens the same menu.
+- **Every mod's settings moved out of RPS UI's menu.** Each mod now has its own page
+  in Mods Config FO4 VR, ROCK's with its setup wizard. Update RPS UI Framework
+  together with ROCK 1.0.4: 2.0.1 and older still list ROCK pages that no longer work.
+- **The menu RobCo PALM's Config opens** keeps the Spawner, the Console and PALM's
+  Wheel items and Wheel settings. It opens on PALM's wheel pages and after that on
+  the tab you left it on. Its header now reads Config.
 
-### Fixed
+### Removed
 
-- The holotape is back. Since `RPS_UI_Framework.esp` became ESL-flagged in 2.0.1,
-  RPS UI could not find it among light plugins, so no holotape was given and playing
-  an old one did nothing.
+- **The RPS UI Settings holotape and `RPS_UI_Framework.esp`.** The menu opens from
+  RobCo PALM's Config. Your mod manager removes the plugin with this update; a save
+  made with it reports it missing once, which is safe to accept.
 
 ## 2.0.1
 
