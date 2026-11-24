@@ -16,7 +16,7 @@ input until it closes.
 - **Spawner**: add any item from your load order to your inventory.
 - **Console**: run console commands with the on-screen keyboard or a real one. Its
   shortcut buttons are in `Mods_Config\RPS_UI_Framework\ConsoleCommands.ini`.
-- The pages other mods add, such as RobCo PALM's **Wheel items** and **Wheel settings**.
+- The pages other mods add: RobCo PALM's **Wheel items** and **Wheel settings**, and ROCK's tab with its setup wizard.
 
 Every mod's settings are on that mod's own page in Mods Config FO4 VR. RPS UI
 Framework no longer has a holotape or a plugin (`RPS_UI_Framework.esp`).
