@@ -7,7 +7,7 @@
 
 /*
  * Pages other mods add to the settings menu (SettingsMenu::registerPage). The menu shows
- * one tab per page after Settings, Spawner and Console, and calls the page's draw callback
+ * one tab per page after Spawner and Console, and calls the page's draw callback
  * inside the page area. Registration runs on any thread; drawing on the render thread
  * under the same mutex, so unregister refuses (CallbackBusy) while a page is drawing and
  * a page's callback never runs after unregister returned Ok.

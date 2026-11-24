@@ -1,7 +1,7 @@
 #pragma once
 #include "Framework.h"
 
-// The settings menu: every RPS mod's settings pages, the Spawner and the Console on one
+// The settings menu: the Spawner, the Console and the pages mods add, on one
 // panel RPS UI owns. Players open it from the RPS UI holotape in the Pip-Boy; a mod may
 // open it too (RobCo PALM's wheel does) and add its own pages, which it draws with its own
 // copy of Dear ImGui exactly like a Framework panel. Owner tokens come from
@@ -60,7 +60,7 @@ namespace rpsui::api::settings_menu
         std::uint32_t version{ kRecordVersion };
         char pageId[64]{};
         char title[32]{};              // The tab's label
-        std::int32_t sortOrder{ 0 };   // Pages follow Settings, Spawner and Console in this order
+        std::int32_t sortOrder{ 0 };   // Pages follow Spawner and Console in this order
         std::uint32_t reserved{ 0 };
         framework::ImGuiBuild imgui{};
         PageDrawCallback drawCallback{ nullptr };

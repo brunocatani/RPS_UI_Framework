@@ -128,8 +128,8 @@ namespace rpsui::settings
         }
 
         // Publishes a new snapshot of the store's last values with the previews over them,
-        // reading the theme when its name changed or reloadTheme is set. Watcher (or load
-        // thread at start) only.
+        // reading the theme when its name changed or reloadTheme is set. reason names a file
+        // read in the log and is empty for a preview. Watcher (or load thread at start) only.
         void publish(std::string_view reason, bool reloadTheme)
         {
             auto& value = state();
@@ -155,8 +155,10 @@ namespace rpsui::settings
                 next->theme = previous->theme;
             }
             next->revision = store.revision();
-            log::info("RPS UI settings {}: theme '{}', sharpness {:.2f}, haptic strength {:.2f}, grip move {:.2f} s, previews {}",
-                reason, next->theme->theme.name, next->sharpness, next->hapticStrength, next->gripMoveSeconds, previews.size());
+            // A file read is logged; a preview is not, as a slider drag sends many.
+            if (!reason.empty())
+                log::info("RPS UI settings {}: theme '{}', sharpness {:.2f}, haptic strength {:.2f}, grip move {:.2f} s, previews {}",
+                    reason, next->theme->theme.name, next->sharpness, next->hapticStrength, next->gripMoveSeconds, previews.size());
             value.current.store(std::move(next), std::memory_order_release);
         }
 
@@ -206,7 +208,7 @@ namespace rpsui::settings
                     if (readFiles)
                         load(false, themeChanged);
                     else
-                        publish("previewed", false);
+                        publish({}, false);
                 } catch (const std::exception& failure) {
                     log::warn("RPS UI settings could not be reread: {}; the last values stay", failure.what());
                 }
