@@ -1,4 +1,4 @@
-#include "RockConfigurationClient.h"
+#include "LoadedRpsMods.h"
 #include "IniSettingsStore.h"
 #include "EmitterSettings.h"
 
@@ -169,28 +169,6 @@ namespace rpsui::settings_menu
             return quoted + '"';
         }
 
-        // ROCK writes Float3 values as "[x, y, z]".
-        [[nodiscard]] std::optional<std::array<std::string, 3>> splitFloat3(std::string_view text)
-        {
-            const auto trimmed = IniSettingsStore::trim(text);
-            std::string_view value = trimmed;
-            if (value.size() < 2 || value.front() != '[' || value.back() != ']')
-                return std::nullopt;
-            value = value.substr(1, value.size() - 2);
-            std::array<std::string, 3> result;
-            for (std::size_t index = 0; index < result.size(); ++index) {
-                const auto comma = value.find(',');
-                if ((comma == std::string_view::npos) != (index + 1 == result.size()))
-                    return std::nullopt;
-                result[index] = IniSettingsStore::trim(value.substr(0, comma));
-                double parsed = 0.0;
-                if (!parseFloat(result[index], parsed))
-                    return std::nullopt;
-                value = comma == std::string_view::npos ? std::string_view{} : value.substr(comma + 1);
-            }
-            return result;
-        }
-
         [[nodiscard]] std::optional<std::string> normalizeValueForSetting(
             const SettingRecord& setting,
             std::string_view rawValue,
@@ -282,7 +260,7 @@ namespace rpsui::settings_menu
         setting.selectedOptionIndex.reset();
         setting.numericValueValid = false;
         if (_mod != RpsMod::Csah) {
-            if (!setting.fromRockApi) setting.type = setting.tomlString ? SettingType::String : inferType(setting.value);
+            setting.type = setting.tomlString ? SettingType::String : inferType(setting.value);
             if(_mod==RpsMod::Diamond)if(const auto* entry=diamond::configuration::find(setting.section,setting.key)) {
                 using Type=diamond::configuration::Type;
                 setting.type=entry->type==Type::Toggle?SettingType::Boolean:entry->type==Type::Choice?SettingType::String:SettingType::Float;
@@ -298,7 +276,7 @@ namespace rpsui::settings_menu
                 controlValueType(setting.type),
                 setting.key,
                 setting.value,
-                setting.description, _mod, setting.section);
+                _mod, setting.section);
             if (_mod == RpsMod::RpsUi && setting.key == "Theme") setting.control = themeChoices(setting.value);
         }
         if (setting.type == SettingType::Integer) {
@@ -322,30 +300,6 @@ namespace rpsui::settings_menu
         }
     }
 
-    rock::api::configuration::Group IniSettingsStore::rockGroup() const noexcept
-    {
-        return _mod == RpsMod::RockDeveloper ? rock::api::configuration::Group::Developer : rock::api::configuration::Group::Consumer;
-    }
-
-    bool IniSettingsStore::connectRockApi()
-    {
-#ifdef RPSUI_SETTINGS_MENU_PREVIEW
-        // Production previews stay read-only; an injected API is only a test fixture.
-        if (!_configurationApi) { _useRockApi=false; return true; }
-#endif
-        if (!_configurationApi) {
-            const auto connection=configurationConnection(_mod);
-            _configurationApi=connection.api; _configurationOwner=connection.owner;
-            _lastProviderStatus=connection.status;
-        }
-        if (!_configurationApi || !_configurationOwner || !_configurationApi->revision || !_configurationApi->visit || !_configurationApi->setValue) {
-            _configurationApi = nullptr;
-            _lastError = "ROCK's configuration interface is unavailable; load the matching ROCK version";
-            return false;
-        }
-        return true;
-    }
-
     bool IniSettingsStore::needsReload() const noexcept
     {
         if (_scissorsApi) {
@@ -356,83 +310,7 @@ namespace rpsui::settings_menu
             diamond::configuration::Snapshot snapshot;
             return _diamondApi->snapshot(&snapshot)!=diamond::configuration::Status::Ok || snapshot.revision!=_loadedRevision;
         }
-        std::uint64_t revision{};
-        return _configurationApi && (_configurationApi->revision(_configurationOwner,&revision)!=rock::api::Status::Ok || revision != _loadedRevision);
-    }
-
-    bool IniSettingsStore::reloadRockSnapshot()
-    {
-        struct Snapshot { IniSettingsStore* store; std::vector<SettingRecord> settings; bool failed = false; } snapshot{this, {}};
-        const auto visitor = [](const rock::api::configuration::Setting* entry, void* context) noexcept {
-            auto& snapshot = *static_cast<Snapshot*>(context);
-            if (snapshot.failed) return;
-            try {
-                auto& store = *snapshot.store;
-                SettingRecord setting;
-                setting.section = entry->section;
-                setting.key = entry->key;
-                setting.id = setting.section + "." + setting.key;
-                setting.value = entry->value;
-                setting.defaultValue = entry->defaultValue;
-                setting.category = entry->category;
-                setting.description = collapseWhitespace(entry->description);
-                for (std::string_view rest = entry->description ? entry->description : ""; !rest.empty();) {
-                    const auto end = rest.find('\n');
-                    if (auto line = trim(rest.substr(0, end)); !line.empty()) setting.helpLines.emplace_back(line);
-                    rest = end == std::string_view::npos ? std::string_view{} : rest.substr(end + 1);
-                }
-                setting.fromRockApi = true;
-                setting.overridden = entry->overridden != 0;
-                setting.lineIndex = (std::numeric_limits<std::size_t>::max)();
-                switch (entry->type) {
-                case rock::api::configuration::ValueType::Boolean: setting.type = SettingType::Boolean; break;
-                case rock::api::configuration::ValueType::Integer: setting.type = SettingType::Integer; break;
-                case rock::api::configuration::ValueType::Float: setting.type = SettingType::Float; break;
-                case rock::api::configuration::ValueType::String: setting.type = SettingType::String; break;
-                case rock::api::configuration::ValueType::Float3: {
-                    // One numeric row per component; a write sends the whole list.
-                    const auto values = splitFloat3(setting.value);
-                    const auto defaults = splitFloat3(setting.defaultValue);
-                    if (!values || !defaults) {
-                        snapshot.failed = true;
-                        return;
-                    }
-                    static constexpr std::array<const char*, 3> kAxes{ "X", "Y", "Z" };
-                    static constexpr std::array<const char*, 3> kAngles{ "Pitch", "Yaw", "Roll" };
-                    const auto& names = setting.key.ends_with("RotationDegrees") ? kAngles : kAxes;
-                    for (std::size_t component = 0; component < names.size(); ++component) {
-                        SettingRecord row = setting;
-                        row.type = SettingType::Float;
-                        row.vectorComponent = component;
-                        row.componentLabel = names[component];
-                        row.id = setting.id + "." + names[component];
-                        row.value = (*values)[component];
-                        row.defaultValue = (*defaults)[component];
-                        row.overridden = row.value != row.defaultValue;
-                        store.refreshControl(row);
-                        snapshot.settings.push_back(std::move(row));
-                    }
-                    return;
-                }
-                default:
-                    snapshot.failed = true;
-                    return;
-                }
-                store.refreshControl(setting);
-                snapshot.settings.push_back(std::move(setting));
-            } catch (...) {
-                snapshot.failed = true;
-            }
-        };
-        _lastProviderStatus=_configurationApi->visit(_configurationOwner,rockGroup(), visitor, &snapshot);
-        if (_lastProviderStatus!=rock::api::Status::Ok || snapshot.failed) {
-            _lastError = "ROCK configuration is not ready";
-            return false;
-        }
-        _settings = std::move(snapshot.settings);
-        _lastProviderStatus=_configurationApi->revision(_configurationOwner,&_loadedRevision);
-        if (_lastProviderStatus!=rock::api::Status::Ok) { _lastError="ROCK configuration revision unavailable"; return false; }
-        return true;
+        return false;
     }
 
     bool IniSettingsStore::load()
@@ -460,8 +338,6 @@ namespace rpsui::settings_menu
 
         if (isScissorsConfiguration(_mod)) return loadScissorsSettings();
         if (_mod == RpsMod::Diamond) return loadDiamondSettings();
-        if (_useRockApi && !connectRockApi()) return false;
-        if (_useRockApi) return reloadRockSnapshot();
         if (_mod == RpsMod::Csah) return loadCsahSettings();
 
         std::ifstream input(_path);
@@ -909,15 +785,6 @@ namespace rpsui::settings_menu
         return true;
     }
 
-    SettingChangeResult IniSettingsStore::resetByIndex(std::size_t index)
-    {
-        if (index >= _settings.size() || _settings[index].defaultValue.empty()) {
-            return { .message = "This value has no default to return to" };
-        }
-        const auto value = _settings[index].defaultValue;
-        return setValueByIndex(index, value);
-    }
-
     SettingChangeResult IniSettingsStore::setValueByIndex(std::size_t index, std::string_view value)
     {
         if (index >= _settings.size()) {
@@ -962,37 +829,6 @@ namespace rpsui::settings_menu
         if (_mod == RpsMod::Csah) {
             if (!saveCsahSetting(setting, *normalizedValue))
                 return { .message = _lastError, .setting = setting };
-            setting.value = *normalizedValue;
-            refreshControl(setting);
-            return { .changed = true, .saved = true, .message = "saved", .setting = setting };
-        }
-        if (setting.fromRockApi) {
-#ifndef RPSUI_SETTINGS_MENU_PREVIEW
-            // A Float3 row writes the whole "[x, y, z]" list with its siblings' current values.
-            std::string providerValue = *normalizedValue;
-            if (setting.vectorComponent) {
-                std::array<std::string, 3> components;
-                std::size_t found = 0;
-                for (const auto& sibling : _settings) {
-                    if (sibling.vectorComponent && sibling.section == setting.section && sibling.key == setting.key &&
-                        *sibling.vectorComponent < components.size()) {
-                        components[*sibling.vectorComponent] = sibling.value;
-                        ++found;
-                    }
-                }
-                if (found != components.size())
-                    return { .message = "vector setting is incomplete", .setting = setting };
-                components[*setting.vectorComponent] = *normalizedValue;
-                providerValue = std::format("[{}, {}, {}]", components[0], components[1], components[2]);
-            }
-            std::array<char, 512> error{};
-            _lastProviderStatus=_configurationApi ? _configurationApi->setValue(_configurationOwner,rockGroup(), setting.section.c_str(),
-                    setting.key.c_str(), providerValue.c_str(), error.data(), static_cast<std::uint32_t>(error.size())) : rock::api::Status::NotReady;
-            if (_lastProviderStatus!=rock::api::Status::Ok) {
-                _lastError = error[0] ? error.data() : "ROCK configuration write failed";
-                return { .changed = false, .saved = false, .message = _lastError, .setting = setting };
-            }
-#endif
             setting.value = *normalizedValue;
             refreshControl(setting);
             return { .changed = true, .saved = true, .message = "saved", .setting = setting };

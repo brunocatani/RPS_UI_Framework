@@ -50,7 +50,7 @@ int main(int argc, char** argv) {
         auto menu = fixture();
         const auto writeCatalog = [&] { std::ofstream file(catalog); file << menu; };
         writeCatalog();
-        IniSettingsStore store(toml, RpsMod::Csah, nullptr, catalog);
+        IniSettingsStore store(toml, RpsMod::Csah, catalog);
         require(store.load(), store.lastError().c_str());
         require(store.settings().size() == 3, "catalog omitted missing keys or exposed unrelated keys");
         require(store.settings()[0].type == SettingType::Boolean && store.settings()[0].value == "true", "boolean switch became a numeric field");
@@ -90,7 +90,7 @@ int main(int argc, char** argv) {
         menu = fixture(); menu["schemaVersion"] = 1;
         writeCatalog(); require(!store.reload(), "an INI-era catalog was accepted");
         if (argc > 1) {
-            IniSettingsStore authored(toml, RpsMod::Csah, nullptr, std::filesystem::path(argv[1]));
+            IniSettingsStore authored(toml, RpsMod::Csah, std::filesystem::path(argv[1]));
             require(authored.load(), authored.lastError().c_str());
             std::cout << "Validated all " << authored.settings().size() << " authored CSAH controls\n";
         }

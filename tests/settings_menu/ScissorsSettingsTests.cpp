@@ -5,7 +5,6 @@ int main(int argc,char** argv) {
     using namespace rpsui::settings_menu;
     namespace config=scissors::configuration;
     assert(argc==2);
-    assert(!isRockConfiguration(RpsMod::Scissors)&&!isRockConfiguration(RpsMod::ScissorsDeveloper));
     assert(std::wstring_view(modInfo(RpsMod::Scissors).module)==L"SCISSORS.dll");
     assert(std::string_view(modInfo(RpsMod::ScissorsDeveloper).ini)=="SCISSORS_Developer.toml");
     IniSettingsStore absent("never-read.ini",RpsMod::Scissors);assert(!absent.load());
@@ -20,8 +19,8 @@ int main(int argc,char** argv) {
 #else
     const config::Api* fixture=nullptr; // Exercise real named-module discovery.
 #endif
-    IniSettingsStore consumer("never-read.ini",RpsMod::Scissors,nullptr,{},0,fixture);
-    IniSettingsStore developer("never-read-dev.ini",RpsMod::ScissorsDeveloper,nullptr,{},0,fixture);
+    IniSettingsStore consumer("never-read.ini",RpsMod::Scissors,{},fixture);
+    IniSettingsStore developer("never-read-dev.ini",RpsMod::ScissorsDeveloper,{},fixture);
     assert(consumer.load()&&developer.load());
     // Each page shows exactly its group's rows of SCISSORS' catalog, at the module's values.
     const auto indexOf=[](const IniSettingsStore& store,std::string_view key) {

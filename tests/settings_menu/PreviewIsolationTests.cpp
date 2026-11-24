@@ -12,7 +12,7 @@ int main() {
  try {
   const std::string original="[Preview]\nbEnabled=true\nfValue=1.0\n";
   {std::ofstream file(path);file<<original;}
-  rpsui::settings_menu::IniSettingsStore store(path);
+  rpsui::settings_menu::IniSettingsStore store(path, rpsui::settings_menu::RpsMod::Paper);
   if(!store.load() || store.settings().empty())throw std::runtime_error("Preview snapshot failed");
   const auto result=store.setBooleanByIndex(0,false);
   if(!result.changed || !result.saved || store.settings()[0].value!="false")throw std::runtime_error("Preview edit did not update its model");

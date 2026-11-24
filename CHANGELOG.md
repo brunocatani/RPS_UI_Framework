@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **ROCK's settings pages are gone from the ROCK Family Configurator.** ROCK 1.0.4
+  moves its settings and setup wizard to its own page in Mods Config FO4 VR. The
+  other mods' pages, the Spawner and the Console stay. Update RPS UI Framework
+  together with ROCK 1.0.4: 2.0.2 and older still list ROCK pages that no longer work.
+
 ## 2.0.2
 
 ### Added

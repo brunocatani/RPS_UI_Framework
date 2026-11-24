@@ -56,7 +56,7 @@ menu->registerPage(owner, &page, &handle);
 
 ## Settings pages and their help
 
-The Settings tab shows each RPS mod that is loaded: ROCK, PAPER, SCISSORS and the others, plus **ROCK Dev** while ROCK's `Developer.EnableDeveloperSettings` is on. Each category opens with its choices as named options, each with a line under it, and keeps numbers and text under **Fine-tuning**, where a value changed from ROCK's default has a Default button.
+The Settings tab shows each RPS mod that is loaded: PAPER, SCISSORS and the others. ROCK has no page here; its settings are on ROCK's page in Mods Config FO4 VR. Each category opens with its choices as named options, each with a line under it, and keeps numbers and text under **Fine-tuning**.
 
 The page builds those choices from each setting's help, written one entry per line:
 
@@ -69,4 +69,4 @@ False: the game's own throw.            the line under Off, for on/off settings
 Anything else                           the first such line is shown under the title
 ```
 
-Choice labels must not contain `,`, `;`, `:` or a full stop. ROCK publishes the help through its Configuration API; mods read from a TOML file give it as the comment lines above each key.
+Choice labels must not contain `,`, `;`, `:` or a full stop. Mods read from a TOML file give the help as the comment lines above each key.

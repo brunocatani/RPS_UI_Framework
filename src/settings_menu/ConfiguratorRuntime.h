@@ -6,7 +6,6 @@
 #include <string_view>
 #include "PanelResizePolicy.h"
 #include "render/NativeRenderer.h"
-namespace rock::api::configuration { struct Api; }
 namespace rpsui::settings_menu {
 void onGameDataReady();
 void onGameSessionReady();
@@ -31,15 +30,11 @@ struct ConsoleKeyEvent { bool character{ false }; std::uint32_t code{ 0 }; };
 // physical keyboard's input to the line it types into, and runs the console's queued commands.
 void serviceConsole(bool keyboardHeld, bool windowFocused, std::span<const ConsoleKeyEvent> keys);
 #ifdef RPSUI_SETTINGS_MENU_PREVIEW
-void initializePreview(const std::filesystem::path& settingsPath = {});
-void initializeRpsPreview(const std::array<std::filesystem::path, 2>& paths, const std::array<bool, 2>& available,
-    const rock::api::configuration::Api* rockApi = nullptr, const std::filesystem::path& csahPath = {},
-    const std::filesystem::path& csahCatalog = {});
 void setPreviewOpen(bool open);
 [[nodiscard]] float previewTabCenterX(unsigned index, float width);
 void drainPreviewActions();
-// The desktop preview's settings folder: ROCK.toml, ROCK_Developer.toml, PAPER.toml and RPS_UI.toml
-// as the files there are, read and written like the game's (without ROCK running, as files).
+// The desktop preview's settings folder: PAPER.toml and RPS_UI.toml as the files there are,
+// read and written like the game's.
 void initializeFilePreview(const std::filesystem::path& folder);
 // Shows a mod's page at the first category whose title contains "category", or a tab.
 void previewShow(std::string_view mod, std::string_view category);

@@ -16,10 +16,9 @@ your Pip-Boy (enable `RPS_UI_Framework.esp`; you get the holotape whenever a gam
 or loads without one, with or without RobCo PALM). When you close the Pip-Boy, the menu
 opens in front of you with:
 
-- **Settings** for ROCK, PAPER and the other RPS mods you have loaded. Each page starts
-  with the main choices, named and explained in one line, as in ROCK's setup wizard;
-  numbers are under **Fine-tuning**. Turn on ROCK's *Developer Settings* to add the
-  ROCK Dev page.
+- **Settings** for PAPER and the other RPS mods you have loaded. Each page starts
+  with the main choices, named and explained in one line; numbers are under
+  **Fine-tuning**. ROCK's settings are on ROCK's page in Mods Config FO4 VR.
 - **Spawner**: add any item from your load order to your inventory.
 - **Console**: run console commands with the on-screen keyboard or a real one. Its
   shortcut buttons are in `Mods_Config\RPS_UI_Framework\ConsoleCommands.ini`.

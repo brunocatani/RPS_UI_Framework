@@ -1,7 +1,7 @@
 #pragma once
 #include <array>
 #include <string_view>
-#include "RockSettingControlPolicy.h"
+#include "SettingControlPolicy.h"
 
 namespace rpsui::settings_menu::emitter_settings
 {

@@ -102,16 +102,14 @@ source_group(TREE "${ROOT_DIR}" FILES ${headers} ${sources})
 
 # The settings menu (src/settings_menu): every mod's settings pages, the Spawner and the Console.
 # It is its own library, once for the game and once for the desktop preview, which has no game.
-# It reads ROCK's and SCISSORS' Configuration tables, so it compiles against their public headers.
+# It reads SCISSORS' and DIAMOND's Configuration tables, so it compiles against their public headers.
 list(FILTER headers EXCLUDE REGEX "/src/settings_menu/")
 list(FILTER sources EXCLUDE REGEX "/src/settings_menu/")
-set(ROCK_INCLUDE_DIR "${WORKSPACE_ROOT}/PROJECT_ROCK_V2/main_projects/ROCK/include"
-  CACHE PATH "ROCK public include directory")
 set(SCISSORS_INCLUDE_DIR "${WORKSPACE_ROOT}/PROJECT_ROCK_V2/main_projects/SCISSORS/include"
   CACHE PATH "SCISSORS public include directory")
 set(DIAMOND_INCLUDE_DIR "${WORKSPACE_ROOT}/PROJECT_ROCK_V2/main_projects/DIAMOND/include"
   CACHE PATH "DIAMOND public include directory")
-foreach(dir ROCK_INCLUDE_DIR SCISSORS_INCLUDE_DIR DIAMOND_INCLUDE_DIR)
+foreach(dir SCISSORS_INCLUDE_DIR DIAMOND_INCLUDE_DIR)
   if(NOT EXISTS "${${dir}}")
     message(FATAL_ERROR "${dir} '${${dir}}' not found")
   endif()
@@ -128,14 +126,14 @@ set(SETTINGS_MENU_SOURCES
   src/settings_menu/MenuTheme.cpp
   src/settings_menu/render/MenuPanel.cpp
   src/settings_menu/OnScreenKeyboard.cpp
-  src/settings_menu/RockSettingControlPolicy.cpp
   src/settings_menu/ScissorsSettings.cpp
+  src/settings_menu/SettingControlPolicy.cpp
   src/settings_menu/SpawnBrowser.cpp)
 foreach(target rpsui_settings_menu rpsui_settings_menu_preview)
   add_library(${target} STATIC ${SETTINGS_MENU_SOURCES})
   target_include_directories(${target} PUBLIC
     "${SOURCE_DIR}/settings_menu" "${PUBLIC_INCLUDE_DIR}"
-    "${ROCK_INCLUDE_DIR}" "${SCISSORS_INCLUDE_DIR}" "${DIAMOND_INCLUDE_DIR}")
+    "${SCISSORS_INCLUDE_DIR}" "${DIAMOND_INCLUDE_DIR}")
   target_link_libraries(${target} PUBLIC rpsui_imgui spdlog::spdlog nlohmann_json::nlohmann_json shell32.lib)
   target_compile_features(${target} PUBLIC cxx_std_23)
   target_compile_definitions(${target} PUBLIC UNICODE _UNICODE)
@@ -219,8 +217,6 @@ target_link_libraries(RPSUISettingsPreview PRIVATE rpsui_settings_menu_preview d
 target_compile_definitions(RPSUISettingsPreview PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_options(RPSUISettingsPreview PRIVATE /utf-8)
 set(SETTINGS_PREVIEW_EXAMPLES
-  "${ROCK_INCLUDE_DIR}/../data/config/ROCK_example.toml"
-  "${ROCK_INCLUDE_DIR}/../data/config/ROCK_Developer_example.toml"
   "${PAPER_CONFIG_DIR}/PAPER_example.toml")
 add_custom_command(TARGET RPSUISettingsPreview POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:RPSUISettingsPreview>/examples"
@@ -328,10 +324,10 @@ if(RPS_UI_FRAMEWORK_BUILD_TESTS)
   set(SETTINGS_MENU_TEST_DIR "${ROOT_DIR}/tests/settings_menu")
   set(SETTINGS_MENU_STORE_SOURCES
     src/settings_menu/IniSettingsStore.cpp src/settings_menu/ScissorsSettings.cpp
-    src/settings_menu/CsahSettings.cpp src/settings_menu/DiamondSettings.cpp src/settings_menu/RockSettingControlPolicy.cpp)
+    src/settings_menu/CsahSettings.cpp src/settings_menu/DiamondSettings.cpp src/settings_menu/SettingControlPolicy.cpp)
   function(settings_menu_test target)
     add_executable(${target} ${ARGN})
-    target_include_directories(${target} PRIVATE "${SOURCE_DIR}/settings_menu" "${ROCK_INCLUDE_DIR}"
+    target_include_directories(${target} PRIVATE "${SOURCE_DIR}/settings_menu"
       "${SCISSORS_INCLUDE_DIR}" "${DIAMOND_INCLUDE_DIR}" "${PUBLIC_INCLUDE_DIR}")
     target_compile_features(${target} PRIVATE cxx_std_23)
     target_compile_definitions(${target} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
@@ -344,7 +340,7 @@ if(RPS_UI_FRAMEWORK_BUILD_TESTS)
     list(GET stub 1 stub_name)
     add_library(SettingsMenu${stub_source}TestStub SHARED "${SETTINGS_MENU_TEST_DIR}/${stub_source}Stub.cpp")
     target_include_directories(SettingsMenu${stub_source}TestStub PRIVATE
-      "${SCISSORS_INCLUDE_DIR}" "${DIAMOND_INCLUDE_DIR}" "${ROCK_INCLUDE_DIR}")
+      "${SCISSORS_INCLUDE_DIR}" "${DIAMOND_INCLUDE_DIR}")
     target_compile_features(SettingsMenu${stub_source}TestStub PRIVATE cxx_std_23)
     set_target_properties(SettingsMenu${stub_source}TestStub PROPERTIES OUTPUT_NAME ${stub_name} EXCLUDE_FROM_ALL TRUE
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test-providers")
@@ -374,12 +370,11 @@ if(RPS_UI_FRAMEWORK_BUILD_TESTS)
   foreach(test ScissorsPreview CsahPreview DiamondPreview EmittersPreview)
     target_compile_definitions(SettingsMenu${test}Tests PRIVATE RPSUI_SETTINGS_MENU_PREVIEW)
   endforeach()
-  foreach(policy SpawnPluginIdentity RockSettingControlPolicy PanelResizePolicy ConsoleLine ConsoleShortcuts)
+  foreach(policy SpawnPluginIdentity PanelResizePolicy ConsoleLine ConsoleShortcuts)
     settings_menu_test(SettingsMenu${policy}Tests "${SETTINGS_MENU_TEST_DIR}/${policy}Tests.cpp")
     add_test(NAME SettingsMenu.${policy} COMMAND SettingsMenu${policy}Tests)
   endforeach()
-  target_sources(SettingsMenuRockSettingControlPolicyTests PRIVATE src/settings_menu/RockSettingControlPolicy.cpp)
-  foreach(store IniSettingsStoreControl RockConfigurationBridge PreviewIsolation)
+  foreach(store IniSettingsStoreControl PreviewIsolation)
     settings_menu_test(SettingsMenu${store}Tests "${SETTINGS_MENU_TEST_DIR}/${store}Tests.cpp" ${SETTINGS_MENU_STORE_SOURCES})
     add_test(NAME SettingsMenu.${store} COMMAND SettingsMenu${store}Tests)
   endforeach()

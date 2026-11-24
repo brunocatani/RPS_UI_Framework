@@ -7,7 +7,6 @@
  * the first time and again whenever a mod's example changes. --settings <folder> copies that folder's files over the sandbox's first (a
  * Mods_Config folder works: each mod's file is looked up in its own subfolder); the folder
  * itself is only read. The preview reads and writes the sandbox as the game does its files.
- * Without ROCK running, ROCK's pages read ROCK's files.
  *
  * Mouse: the pointer and trigger. Right click: Back (a grip tap). Wheel: the stick's scroll.
  * Keyboard: typing for the Console and the Spawner's searches.
@@ -129,9 +128,7 @@ namespace
         const auto filledFrom = folder / "examples";
         std::error_code error;
         fs::create_directories(filledFrom, error);
-        for (const auto& [example, mod, file] : { std::array<const char*, 3>{ "ROCK_example.toml", "ROCK", "ROCK.toml" },
-                 std::array<const char*, 3>{ "ROCK_Developer_example.toml", "ROCK", "ROCK_Developer.toml" },
-                 std::array<const char*, 3>{ "PAPER_example.toml", "PAPER", "PAPER.toml" } }) {
+        for (const auto& [example, mod, file] : { std::array<const char*, 3>{ "PAPER_example.toml", "PAPER", "PAPER.toml" } }) {
             const auto target = folder / mod / file;
             const auto current = readFile(examples / example);
             if (!current.empty() && readFile(filledFrom / example) != current) {
@@ -256,48 +253,19 @@ namespace
                 menu::drainPreviewActions();
             }
         };
-        menu::previewShow("ROCK", "Grabbing");
-        save("01-rock-grabbing.png");
-        click(1140.0f, 400.0f); // Fingers (Alyx Style)
-        save("01b-rock-grabbing-fingers-picked.png");
-        menu::previewShow("ROCK", "Prompts");
-        save("02-rock-prompts.png");
-        menu::previewShow("ROCK", "Weapon Handling");
-        save("03-rock-weapon-handling.png");
-        click(570.0f, 378.0f); // Gunstock Mode: On
-        save("03b-rock-gunstock-on-picked.png");
-        menu::previewOpenFineTuning(true);
-        save("04-rock-weapon-handling-fine-tuning.png");
-        menu::previewOpenFineTuning(false);
-        menu::previewShow("ROCK", "Recoil");
-        save("05-rock-recoil.png");
-        click(850.0f, 477.0f); // the Fine-tuning fold
-        save("05b-rock-recoil-fine-tuning-opened.png");
-        menu::previewShow("ROCK", "Developer");
-        save("06-rock-developer-switch.png");
         menu::previewShow("PAPER", "Bolt");
-        save("07-paper-bolt-appreciation.png");
+        save("01-paper-bolt-appreciation.png");
         click(570.0f, 370.0f); // Bolt Appreciation: On
-        save("07b-paper-bolt-appreciation-on-picked.png");
+        save("01b-paper-bolt-appreciation-on-picked.png");
         menu::previewShow("PAPER", "Reload");
-        save("07c-paper-reload.png");
-        // With ROCK.toml's Developer Settings on, the ROCK Dev page joins the pages.
-        {
-            const auto rock = sandbox / "ROCK" / "ROCK.toml";
-            const auto bytes = readFile(rock);
-            std::string text(bytes.begin(), bytes.end());
-            const std::string off = "EnableDeveloperSettings = false", on = "EnableDeveloperSettings = true";
-            if (const auto at = text.find(off); at != std::string::npos) text.replace(at, off.size(), on);
-            std::ofstream(rock, std::ios::binary | std::ios::trunc) << text;
-            menu::initializeFilePreview(sandbox);
-            menu::setPreviewOpen(true);
-            menu::previewShow("ROCK Dev", "");
-            save("08-rock-dev.png");
-        }
+        save("02-paper-reload.png");
+        menu::previewOpenFineTuning(true);
+        save("02b-paper-reload-fine-tuning.png");
+        menu::previewOpenFineTuning(false);
         menu::previewShowTab("Spawner");
-        save("09-spawner.png");
+        save("03-spawner.png");
         menu::previewShowTab("Console");
-        save("10-console.png");
+        save("04-console.png");
         return 0;
     }
 

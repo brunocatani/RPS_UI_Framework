@@ -4,7 +4,7 @@
 #include <string_view>
 
 namespace rpsui::settings_menu {
-enum class RpsMod : std::uint8_t { Rock, Paper, RockDeveloper, Csah, Diamond, Emitters, Scissors, ScissorsDeveloper, RpsUi };
+enum class RpsMod : std::uint8_t { Paper, Csah, Diamond, Emitters, Scissors, ScissorsDeveloper, RpsUi };
 struct RpsModInfo {
  RpsMod id;
  const char* name;
@@ -14,9 +14,7 @@ struct RpsModInfo {
  const char* applyHint;
 };
 inline constexpr std::array kRpsMods{
- RpsModInfo{RpsMod::Rock,"ROCK",L"ROCK.dll","Mods_Config/ROCK","ROCK.toml","Changes save to ROCK.toml and apply live"},
  RpsModInfo{RpsMod::Paper,"PAPER",L"PAPER.dll","Mods_Config/PAPER","PAPER.toml","Changes save to PAPER.toml and apply live"},
- RpsModInfo{RpsMod::RockDeveloper,"ROCK Dev",L"ROCK.dll","Mods_Config/ROCK","ROCK_Developer.toml","Changes save to ROCK_Developer.toml; only values off their defaults are kept"},
  RpsModInfo{RpsMod::Csah,"CSAH",L"CSAH.dll","Mods_Config/CSAH","CSAH.toml","Changes apply through CSAH's watcher; controls marked Restart apply next launch"},
  RpsModInfo{RpsMod::Diamond,"DIAMOND",L"DIAMOND.dll","Mods_Config/DIAMOND","DIAMOND.toml","The pouch's outline and panel show while this page is open. Changes are saved by DIAMOND and apply next frame"},
  RpsModInfo{RpsMod::Emitters,"Emitters",L"ROCK_Emitters.dll","Mods_Config/ROCK_Emitters","ROCK_Emitters.toml","Changes save to ROCK_Emitters.toml and apply live within about 250 ms"},
@@ -26,12 +24,8 @@ inline constexpr std::array kRpsMods{
 };
 inline constexpr const RpsModInfo& modInfo(RpsMod mod){return kRpsMods[static_cast<std::size_t>(mod)];}
 inline constexpr std::array kRpsModDisplayOrder{
- RpsMod::Rock,RpsMod::RockDeveloper,
  RpsMod::Paper,RpsMod::Csah,RpsMod::Diamond,RpsMod::Emitters,RpsMod::Scissors,RpsMod::ScissorsDeveloper,RpsMod::RpsUi
 };
-inline constexpr bool isRockConfiguration(RpsMod mod) {
- return mod==RpsMod::Rock || mod==RpsMod::RockDeveloper;
-}
 inline constexpr bool isScissorsConfiguration(RpsMod mod) {
  return mod==RpsMod::Scissors || mod==RpsMod::ScissorsDeveloper;
 }

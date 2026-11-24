@@ -13,12 +13,4 @@ inline bool configurationModLoaded(RpsMod mod) noexcept {
  return false; // Preview availability comes only from its explicit fixtures.
 #endif
 }
-inline std::optional<RpsMod> loadedRockMod() noexcept {
-#ifndef RPSUI_SETTINGS_MENU_PREVIEW
- if(configurationModLoaded(RpsMod::Rock)) return RpsMod::Rock;
- return std::nullopt;
-#else
- return std::nullopt;
-#endif
-}
 }

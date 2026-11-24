@@ -6,7 +6,6 @@
 #include "ConsoleTab.h"
 #include "ExternalPages.h"
 #include "SettingHelp.h"
-#include "RockConfigurationClient.h"
 #include "OnScreenKeyboard.h"
 #include "IniSettingsStore.h"
 #include "LoadedRpsMods.h"
@@ -16,7 +15,6 @@
 #include "render/NativeRenderer.h"
 #include <imgui_internal.h>
 #include "render/ConfigUi.h"
-#include <RPS_UI_Framework/BindingIcons.h>
 
 
 namespace rpsui::settings_menu
@@ -59,11 +57,9 @@ namespace rpsui::settings_menu
             UiSetBooleanRow,
             UiSetNumericRow,
             UiSetOptionRow,
-            UiResetRow,
             UiReload,
             UiRefreshSettings,
             UiResetPanelLayout,
-            UiOpenRockSetup,
             UiSpawnSelectPlugin,
             UiSpawnSelectCategory,
             UiSpawnOpenItem,
@@ -128,9 +124,7 @@ namespace rpsui::settings_menu
             std::size_t activeIndex = 0;
         };
         std::array<ModSettings, kRpsMods.size()> s_modSettings{
-            ModSettings{IniSettingsStore({}, RpsMod::Rock)},
             ModSettings{IniSettingsStore({}, RpsMod::Paper)},
-            ModSettings{IniSettingsStore({}, RpsMod::RockDeveloper)},
             ModSettings{IniSettingsStore({}, RpsMod::Csah)},
             ModSettings{IniSettingsStore({}, RpsMod::Diamond)},
             ModSettings{IniSettingsStore({}, RpsMod::Emitters)},
@@ -265,12 +259,11 @@ namespace rpsui::settings_menu
                 anchor.fallbackIndex = activeIndex;
             }
             const auto previousError = store.lastError();
-            const auto previousStatus = store.lastProviderStatus();
             const bool wasLoaded = loaded;
             loaded = reload ? store.reload() : store.load();
-            if (!loaded && (wasLoaded || previousError != store.lastError() || previousStatus != store.lastProviderStatus())) {
-                logger::warn("Settings menu load failed: path='{}' error='{}' providerStatus={} thread={}",
-                    store.path().string(), store.lastError(), static_cast<unsigned>(store.lastProviderStatus()), GetCurrentThreadId());
+            if (!loaded && (wasLoaded || previousError != store.lastError())) {
+                logger::warn("Settings menu load failed: path='{}' error='{}' thread={}",
+                    store.path().string(), store.lastError(), GetCurrentThreadId());
             } else if (loaded && !wasLoaded) {
                 logger::info("Settings menu catalog loaded: path='{}' settings={} thread={}",
                     store.path().string(), store.settings().size(), GetCurrentThreadId());
@@ -348,23 +341,12 @@ namespace rpsui::settings_menu
 #endif
         }
 
-        // The ROCK Dev page shows only while ROCK.toml's Developer.EnableDeveloperSettings is on.
-        [[nodiscard]] bool rockDeveloperSettingsEnabledLocked()
-        {
-            const auto& rock = s_modSettings[static_cast<std::size_t>(RpsMod::Rock)];
-            if (!rock.loaded) return false;
-            for (const auto& setting : rock.store.settings())
-                if (setting.id == "Developer.EnableDeveloperSettings") return setting_control::equalsIgnoreCase(setting.value, "true");
-            return false;
-        }
-
         void loadRpsSettingsLocked(bool reloadLoaded)
         {
             s_pendingNumericEdit.reset();
             for (std::size_t i = 0; i < s_modSettings.size(); ++i) {
                 auto& settings = s_modSettings[i];
-                settings.available = modPresentLocked(i) &&
-                    (kRpsMods[i].id != RpsMod::RockDeveloper || rockDeveloperSettingsEnabledLocked());
+                settings.available = modPresentLocked(i);
                 if (settings.available)
                     (void)readStoreLocked(settings.store, settings.loaded, settings.activeIndex,
                         settings.anchor, settings.identity, reloadLoaded && settings.loaded);
@@ -463,14 +445,6 @@ namespace rpsui::settings_menu
         void applySettingChangeLocked(const SettingChangeResult& result)
         {
             s_statusMessage = result.message.empty() ? "No change" : result.message;
-            if (!result.saved && result.setting.fromRockApi) {
-                logger::warn("Settings menu write failed: [{}] {} error='{}' providerStatus={} thread={}",
-                    result.setting.section, result.setting.key, result.message,
-                    static_cast<unsigned>(activeSettings().store.lastProviderStatus()), GetCurrentThreadId());
-            }
-            if (result.changed && result.saved && result.setting.id == "Developer.EnableDeveloperSettings") {
-                loadRpsSettingsLocked(false);
-            }
             if (result.changed && result.saved) {
                 // The desktop preview writes the files of the folder it was given, like the game.
                 (void)readActiveStoreLocked(true);
@@ -561,21 +535,6 @@ namespace rpsui::settings_menu
             }
         }
 
-        // ROCK's setup wizard opens in front of the player; Config closes so it is not in the way.
-        void openRockSetupLocked()
-        {
-            const auto connection = configurationConnection(RpsMod::Rock);
-            const auto status = connection.api && connection.api->openSetupWizard
-                ? connection.api->openSetupWizard(connection.owner)
-                : rock::api::Status::NotReady;
-            if (status != rock::api::Status::Ok) {
-                s_statusMessage = "ROCK could not open its setup wizard";
-                logger::warn("Settings menu: ROCK setup wizard request failed ({})", static_cast<unsigned>(status));
-                return;
-            }
-            closePanelLocked("ROCK setup wizard opened");
-        }
-
         void resetPanelLayoutLocked()
         {
             s_hoveredResizeHandle.store(panel_resize::Handle::None, std::memory_order_release);
@@ -646,12 +605,6 @@ namespace rpsui::settings_menu
             case RuntimeActionKind::UiSetOptionRow:
                 setOptionRowLocked(action);
                 break;
-            case RuntimeActionKind::UiResetRow:
-                if (validatesSettingTargetLocked(action)) {
-                    activeSettings().activeIndex = action.index;
-                    applySettingChangeLocked(activeSettings().store.resetByIndex(action.index));
-                }
-                break;
             case RuntimeActionKind::UiRefreshSettings:
                 s_settingsRefreshQueued.store(false);
                 if (s_activeTab.load() == ConfiguratorTab::Settings) {
@@ -663,9 +616,6 @@ namespace rpsui::settings_menu
                 break;
             case RuntimeActionKind::UiResetPanelLayout:
                 resetPanelLayoutLocked();
-                break;
-            case RuntimeActionKind::UiOpenRockSetup:
-                openRockSetupLocked();
                 break;
             case RuntimeActionKind::UiSpawnSelectPlugin:
                 if (spawnTabActive()) {
@@ -997,9 +947,6 @@ namespace rpsui::settings_menu
                 if (devui::visual::button("Reload from disk", {-1, 40})) {
                     (void)queueUiAction({.kind = RuntimeActionKind::UiReload, .tab = tab});
                 }
-                if (static_cast<RpsMod>(s_modIndex) == RpsMod::Rock && devui::visual::button("Setup wizard", {-1, 40})) {
-                    (void)queueUiAction({.kind = RuntimeActionKind::UiOpenRockSetup});
-                }
             }
             ImGui::Dummy({0, 12});
             const auto& settings = store.settings();
@@ -1057,30 +1004,6 @@ namespace rpsui::settings_menu
             return "%.0f";
         }
 
-        // The hand of a ROCK button-layout row, whose options are physical controls.
-        [[nodiscard]] std::optional<rpsui::binding::Hand> controllerInputHand(std::string_view section) noexcept
-        {
-            if (section == "ControllerInput.Left") return rpsui::binding::Hand::Left;
-            if (section == "ControllerInput.Right") return rpsui::binding::Hand::Right;
-            return std::nullopt;
-        }
-
-        // A physical control in a ROCK button-layout list: its icon, then its label.
-        [[nodiscard]] bool bindingOption(const setting_control::Option& option, rpsui::binding::Hand hand, bool selected, int id)
-        {
-            constexpr float height = 40.0f;
-            ImGui::PushID(id);
-            const bool chosen = ImGui::Selectable("##option", selected, ImGuiSelectableFlags_None, {0.0f, height});
-            ImGui::PopID();
-            const ImVec2 lo = ImGui::GetItemRectMin();
-            auto* draw = ImGui::GetWindowDrawList();
-            const auto ink = packed(textColor(1.0f));
-            rpsui::binding::drawIcon(draw, {lo.x + height * 0.5f, lo.y + height * 0.5f}, height * 0.85f,
-                {.input = {hand, rpsui::binding::parseControl(option.value).value_or(rpsui::binding::Control::None)}}, ink);
-            draw->AddText({lo.x + height + 8.0f, lo.y + (height - ImGui::GetFontSize()) * 0.5f}, ink, option.label.c_str());
-            return chosen;
-        }
-
         void drawSettingRow(
             const SettingRecord& setting,
             std::size_t index,
@@ -1116,10 +1039,7 @@ namespace rpsui::settings_menu
             {
                 ScopedFont font(devui::render::FontRole::Medium, 25);
                 if (!setting.label.empty()) ImGui::TextUnformatted(setting.label.c_str());
-                else if (!setting.componentLabel.empty()) {
-                    const devui::visual::ReadableLabel label(setting.key, true);
-                    ImGui::Text("%s %s", label.text.data(), setting.componentLabel.c_str());
-                } else {
+                else {
                     const devui::visual::ReadableLabel label(setting.key, true);
                     ImGui::TextUnformatted(label.text.data());
                 }
@@ -1130,10 +1050,6 @@ namespace rpsui::settings_menu
                 ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30);
                 ImGui::TextUnformatted(setting.key.c_str());
                 if (!setting.description.empty()) ImGui::TextWrapped("%s", setting.description.c_str());
-                if (setting.fromRockApi) {
-                    ImGui::Text("Default: %s", setting.defaultValue.c_str());
-                    ImGui::TextUnformatted(setting.overridden ? "Saved override" : "Using default");
-                }
                 ImGui::TextDisabled("%s", setting.id.c_str());
                 ImGui::PopTextWrapPos();
                 ImGui::EndTooltip();
@@ -1150,20 +1066,6 @@ namespace rpsui::settings_menu
 
             draw->PopClipRect();
             const auto settingTarget = settingTargetLocked(index);
-            // A value changed from the mod's default can go back to it.
-            if (setting.fromRockApi && setting.overridden && !setting.vectorComponent && !setting.defaultValue.empty()) {
-                rowCursor(controlsStart - 100.0f, 14.0f);
-                ScopedFont font(devui::render::FontRole::Body, 16);
-                if (devui::visual::button("Default##reset", { 86.0f, 36.0f })) {
-                    (void)queueUiAction({
-                        .kind = RuntimeActionKind::UiResetRow,
-                        .tab = tab,
-                        .index = index,
-                        .horizontalTarget = settingTarget,
-                    });
-                }
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Back to %s", setting.defaultValue.c_str());
-            }
             switch (setting.control.kind) {
             case setting_control::Kind::Checkbox: {
                 bool enabled = setting_control::equalsIgnoreCase(setting.value, "true") ||
@@ -1258,27 +1160,15 @@ namespace rpsui::settings_menu
                     *setting.selectedOptionIndex < setting.control.options.size()) {
                     preview = setting.control.options[*setting.selectedOptionIndex].label.c_str();
                 }
-                // ROCK's button layout: each option is a physical control, shown with its icon.
-                const auto bindingHand = controllerInputHand(setting.section);
-                float comboStart = controlsStart, comboWidth = controlsWidth - 20.0f;
-                if (bindingHand) {
-                    constexpr float iconSize = 44.0f;
-                    rpsui::binding::drawIcon(draw, {windowPosition.x + controlsStart + iconSize * 0.5f, windowPosition.y + 30.0f}, iconSize,
-                        {.input = {*bindingHand, rpsui::binding::parseControl(setting.value).value_or(rpsui::binding::Control::None)}},
-                        packed(textColor(1.0f)));
-                    comboStart += iconSize + 10.0f;
-                    comboWidth -= iconSize + 10.0f;
-                }
-                rowCursor(comboStart, 10.0f);
-                ImGui::SetNextItemWidth(comboWidth);
+                rowCursor(controlsStart, 10.0f);
+                ImGui::SetNextItemWidth(controlsWidth - 20.0f);
                 if (ImGui::BeginCombo("##dropdown", preview)) {
                     for (std::size_t optionIndex = 0;
                          optionIndex < setting.control.options.size(); ++optionIndex) {
                         const bool selected = setting.selectedOptionIndex &&
                             *setting.selectedOptionIndex == optionIndex;
                         const auto& option = setting.control.options[optionIndex];
-                        if (bindingHand ? bindingOption(option, *bindingHand, selected, static_cast<int>(optionIndex)) :
-                                ImGui::Selectable(option.label.c_str(), selected)) {
+                        if (ImGui::Selectable(option.label.c_str(), selected)) {
                             (void)queueUiAction({
                                 .kind = RuntimeActionKind::UiSetOptionRow,
                                 .tab = tab,
@@ -1337,9 +1227,8 @@ namespace rpsui::settings_menu
         // A choice shows its options as cards: booleans, and short lists that are not button layouts.
         [[nodiscard]] bool isChoice(const SettingRecord& setting) noexcept
         {
-            if (setting.vectorComponent) return false;
             if (setting.control.kind == setting_control::Kind::Checkbox) return true;
-            return setting.control.kind == setting_control::Kind::Dropdown && !controllerInputHand(setting.section) &&
+            return setting.control.kind == setting_control::Kind::Dropdown &&
                    !setting.control.options.empty() && setting.control.options.size() <= 7;
         }
 
@@ -2102,39 +1991,6 @@ namespace rpsui::settings_menu
     }
 
 #ifdef RPSUI_SETTINGS_MENU_PREVIEW
-    void initializePreview(const std::filesystem::path& settingsPath)
-    {
-        std::array<std::filesystem::path, 2> paths{settingsPath, {}};
-        initializeRpsPreview(paths, {true, settingsPath.empty()});
-    }
-
-    void initializeRpsPreview(const std::array<std::filesystem::path, 2>& paths, const std::array<bool, 2>& available,
-        const rock::api::configuration::Api* rockApi, const std::filesystem::path& csahPath,
-        const std::filesystem::path& csahCatalog)
-    {
-        std::scoped_lock lock(s_runtimeMutex);
-        invalidateQueuedRuntimeActions();
-        s_modIndex = 0;
-        s_activeTab = ConfiguratorTab::Settings;
-        for (std::size_t i=0;i<s_modSettings.size();++i)
-            s_modSettings[i]=ModSettings{IniSettingsStore({},kRpsMods[i].id)};
-        auto& developer = s_modSettings[static_cast<std::size_t>(RpsMod::RockDeveloper)];
-        developer = ModSettings{IniSettingsStore({}, RpsMod::RockDeveloper, rockApi, {}, rockApi?1:0)};
-        s_previewPresent.fill(false);
-        s_previewPresent[static_cast<std::size_t>(RpsMod::RockDeveloper)] = available[0] && (paths[0].empty() || rockApi != nullptr);
-        auto& csah = s_modSettings[static_cast<std::size_t>(RpsMod::Csah)];
-        csah = ModSettings{IniSettingsStore(csahPath, RpsMod::Csah, nullptr, csahCatalog)};
-        s_previewPresent[static_cast<std::size_t>(RpsMod::Csah)] = !csahPath.empty() && !csahCatalog.empty();
-        // paths/available index the Rock and Paper pages, whose enum values are 0..1.
-        for (std::size_t i = 0; i < paths.size(); ++i) {
-            s_modSettings[i] = ModSettings{IniSettingsStore(paths[i], kRpsMods[i].id, i == 0 ? rockApi : nullptr, {}, rockApi?1:0)};
-            s_previewPresent[i] = available[i];
-        }
-        s_providerInputReady.store(true);
-        loadRpsSettingsLocked(false); // Read-only snapshot; preview saves are memory-only.
-        s_spawnBrowser.ensureIndexBuilt(); // Compiled preview fixture, no engine calls.
-    }
-
     void initializeFilePreview(const std::filesystem::path& folder)
     {
         std::scoped_lock lock(s_runtimeMutex);
@@ -2143,7 +1999,7 @@ namespace rpsui::settings_menu
         s_previewPresent.fill(false);
         for (std::size_t i = 0; i < s_modSettings.size(); ++i) {
             const auto id = kRpsMods[i].id;
-            const bool file = id == RpsMod::Rock || id == RpsMod::RockDeveloper || id == RpsMod::Paper || id == RpsMod::RpsUi;
+            const bool file = id == RpsMod::Paper || id == RpsMod::RpsUi;
             // A Mods_Config folder keeps each mod's file in the mod's own folder.
             const auto leaf = std::filesystem::path(kRpsMods[i].directory).filename();
             std::error_code error;
@@ -2153,7 +2009,7 @@ namespace rpsui::settings_menu
             s_modSettings[i].store.allowPreviewWrites();
             s_previewPresent[i] = file && std::filesystem::is_regular_file(path, error);
         }
-        s_modIndex = static_cast<std::size_t>(RpsMod::Rock);
+        s_modIndex = static_cast<std::size_t>(RpsMod::Paper);
         s_providerInputReady.store(true);
         loadRpsSettingsLocked(false);
         s_spawnBrowser.ensureIndexBuilt();

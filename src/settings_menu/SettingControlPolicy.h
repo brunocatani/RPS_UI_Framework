@@ -44,8 +44,7 @@ namespace rpsui::settings_menu::setting_control
         ValueType type,
         std::string_view key,
         std::string_view value,
-        std::string_view description,
-        RpsMod mod = RpsMod::Rock,
+        RpsMod mod,
         std::string_view section = {});
 
     [[nodiscard]] double snapNumeric(const Spec& spec, double value) noexcept;

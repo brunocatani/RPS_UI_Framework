@@ -19,7 +19,7 @@ int main(int argc,char** argv) {
 #else
     const config::Api* fixture=nullptr; // Exercise real named-module discovery.
 #endif
-    IniSettingsStore store("never-read.toml",RpsMod::Diamond,nullptr,{},0,nullptr,fixture);
+    IniSettingsStore store("never-read.toml",RpsMod::Diamond,{},nullptr,fixture);
     assert(store.load()&&store.settings().size()==config::kSettingCount);
     // Every row is DIAMOND's catalog entry, in its order, with its control.
     for(std::size_t i=0;i<config::kSettingCount;++i) {

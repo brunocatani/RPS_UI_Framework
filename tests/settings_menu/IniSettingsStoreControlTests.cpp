@@ -36,65 +36,12 @@ int main()
     const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
     const fs::path directory = fs::temp_directory_path() /
         ("devui-setting-controls-" + std::to_string(unique));
-    const fs::path iniPath = directory / "ROCK.ini";
     std::error_code error;
     fs::create_directories(directory, error);
     if (error) {
         std::cerr << "FAIL: could not create the isolated test directory\n";
         return 1;
     }
-    {
-        std::ofstream output(iniPath, std::ios::binary);
-        output <<
-            "; preserved header\n"
-            "[PhysicsInteraction]\n"
-            "bEnabled = true\n"
-            "; 0 = permissive, 1 = hybrid, 2 = strict.\n"
-            "iMode = 1\n"
-            "fContactIntensity = 0.50\n"
-            "fExperimentalRecovery = 5.0\n"
-            "sFreeText = keep-me\n";
-    }
-
-    rpsui::settings_menu::IniSettingsStore store(iniPath);
-    expect(store.load(), "the isolated existing ROCK.ini loads");
-    expect(store.settings().size() == 5, "all test settings are indexed");
-    if (store.settings().size() == 5) {
-        expect(store.settings()[0].control.kind == Kind::Checkbox,
-            "boolean rows are checkbox controls");
-        expect(store.settings()[1].control.kind == Kind::Dropdown,
-            "documented integer modes are dropdown controls");
-        expect(store.settings()[2].control.kind == Kind::Numeric &&
-               store.settings()[2].control.bounded,
-            "normalized numeric rows are bounded sliders");
-        expect(store.settings()[3].control.kind == Kind::Numeric &&
-               !store.settings()[3].control.bounded,
-            "unbounded numeric rows remain draggable");
-        expect(store.settings()[4].control.kind == Kind::Text &&
-               !store.isAdjustable(4),
-            "free-form strings are non-adjustable without a keyboard backend");
-
-        expect(store.setBooleanByIndex(0, false).saved,
-            "checkbox values persist through the explicit boolean setter");
-        expect(store.setOptionByIndex(1, 2).saved,
-            "dropdown values persist through the selected option");
-        expect(store.setNumericByIndex(2, 5.0).saved,
-            "bounded slider values persist after policy clamping");
-        expect(store.setNumericByIndex(3, 5.25).saved,
-            "unbounded drag values persist at their fine step");
-    }
-
-    const auto saved = readAll(iniPath);
-    expect(saved.find("; preserved header") != std::string::npos,
-        "unrelated comments survive control writes");
-    expect(saved.find("bEnabled = false") != std::string::npos,
-        "checkbox writes the explicit false value");
-    expect(saved.find("iMode = 2") != std::string::npos,
-        "dropdown writes the option value rather than its label");
-    expect(saved.find("fContactIntensity = 1.0") != std::string::npos,
-        "bounded slider commits clamp to one");
-    expect(saved.find("fExperimentalRecovery = 5.25") != std::string::npos,
-        "unbounded numeric commits retain fine adjustment");
 
     // A TOML file as RPS Framework's settings store writes it.
     const auto paperPath = directory / "PAPER.toml";
@@ -118,9 +65,11 @@ int main()
         "a TOML option takes its category heading and its ## help, never the player's note");
     expect(paper.settings()[2].category == "04. Development Capture" && paper.settings()[2].value == "User",
         "a TOML string shows without its quotes");
-    expect(!paper.settings()[1].control.bounded && !emitters.settings()[1].control.bounded,
-        "ROCK-specific ranges cannot constrain another mod's matching key");
+    expect(paper.settings()[1].control.kind == Kind::Numeric && !paper.settings()[1].control.bounded,
+        "a number without a published range is a free numeric control");
     expect(paper.setBooleanByIndex(0, false).saved, "PAPER checkbox writes to its own file");
+    expect(paper.setNumericByIndex(1, 0.75).saved && paper.settings()[1].value == "0.75",
+        "a numeric edit keeps its fine step");
     expect(paper.setOptionByIndex(2, 2).saved && paper.settings()[2].value == "Harvest",
         "PAPER development modes use supported values");
     expect(paper.setOptionByIndex(3, 2).saved && paper.settings()[3].value == "ReadWrite",
@@ -128,11 +77,11 @@ int main()
     auto paperSaved = readAll(paperPath);
     std::erase(paperSaved, '\r'); // PALM writes through a text stream.
     expect(paperSaved.find("# my note\nEnabled = false\n") != std::string::npos &&
+               paperSaved.find("ContactIntensity = 0.75\n") != std::string::npos &&
                paperSaved.find("MaximumMode = 'Harvest'\n") != std::string::npos &&
                paperSaved.find("Access = 'ReadWrite'\n") != std::string::npos,
-        "TOML edits keep notes, write booleans bare and strings quoted");
-    expect(readAll(emittersPath) == emittersBefore && readAll(iniPath) == saved,
-        "editing PAPER leaves ROCK and Emitters unchanged");
+        "TOML edits keep notes, write booleans and numbers bare and strings quoted");
+    expect(readAll(emittersPath) == emittersBefore, "editing PAPER leaves Emitters unchanged");
     expect(emitters.setBooleanByIndex(0, false).saved, "Emitters checkbox writes its own file");
     expect(readAll(emittersPath).find("; untouched sibling") != std::string::npos,
         "Emitters comments survive edits");
