@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 4.2)
 
 set(NAME "RPS_UI_Framework")
 set(FRIENDLY_NAME "RPS UI Framework")
-set(VERSION 2.0.1)
+set(VERSION 2.0.2)
 set(ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(SOURCE_DIR "${ROOT_DIR}/src")
 # RPS UI's own provider API: self-contained headers the DLL compiles against.
